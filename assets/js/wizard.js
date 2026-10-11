@@ -46,6 +46,7 @@
                     card.classList.toggle('is-selected', card.getAttribute('data-category') === cat);
                 });
             }
+            showSeverity(form);
         } catch (e) {
             /* ignore */
         }
@@ -86,6 +87,9 @@
             if (!form.elements.incident_date.value) {
                 errors.push('Please select the incident date.');
             }
+            if (personFieldsShown() && form.elements.person_name.value.trim() && !form.elements.person_details.value.trim()) {
+                errors.push('Add a short description of the person involved.');
+            }
         }
         return errors;
     }
@@ -99,11 +103,12 @@
             ['Category', form.elements.complaint_category.value],
             ['Title', form.elements.complaint_title.value],
             ['Description', form.elements.complaint_description.value],
-            ['Respondent', form.elements.respondent_name.value || '—'],
-            ['Respondent type', form.elements.respondent_type.value || '—'],
             ['Incident date', form.elements.incident_date.value],
             ['Location', form.elements.incident_location.value || '—'],
-            ['Severity', form.elements.severity.value],
+            ['Severity', severityLabel()],
+            ['Person involved', personFieldsShown() && form.elements.person_name.value.trim()
+                ? form.elements.person_name.value.trim() + ' — ' + form.elements.person_details.value.trim()
+                : '—'],
         ];
         box.innerHTML = fields.map(function (row) {
             return '<div class="nemsu-review-row"><dt>' + row[0] + '</dt><dd>' + escapeHtml(row[1]) + '</dd></div>';
@@ -116,6 +121,44 @@
         return div.innerHTML;
     }
 
+    // Severity follows the nature of the complaint (set on each category card).
+    function severityLabel() {
+        var card = document.querySelector('.nemsu-category-card.is-selected');
+        return card ? (card.getAttribute('data-severity-label') || '') : '';
+    }
+
+    function showSeverity(form) {
+        var box = document.getElementById('severity_display');
+        if (box) {
+            box.value = severityLabel() || 'Choose the nature of the complaint first';
+        }
+        syncPersonFields(form);
+    }
+
+    // "Name of person involved": not asked for Campus Facilities; the short
+    // description appears (and is required) once a name is typed.
+    function personFieldsShown() {
+        var box = document.getElementById('personInvolvedFields');
+        return !!box && !box.hidden;
+    }
+
+    function syncPersonFields(form) {
+        var box = document.getElementById('personInvolvedFields');
+        var details = document.getElementById('personDetailsField');
+        if (!box || !form.elements.person_name) {
+            return;
+        }
+        var hide = form.elements.complaint_category.value === box.getAttribute('data-hide-for-category');
+        box.hidden = hide;
+        form.elements.person_name.disabled = hide;
+        var named = !hide && form.elements.person_name.value.trim() !== '';
+        if (details) {
+            details.hidden = !named;
+        }
+        form.elements.person_details.disabled = !named;
+        form.elements.person_details.required = named;
+    }
+
     function initCategoryCards(form) {
         qsa('.nemsu-category-card').forEach(function (card) {
             card.addEventListener('click', function () {
@@ -126,6 +169,7 @@
                 card.classList.add('is-selected');
                 card.setAttribute('aria-pressed', 'true');
                 form.elements.complaint_category.value = card.getAttribute('data-category') || '';
+                showSeverity(form);
                 saveDraft(form);
             });
             card.addEventListener('keydown', function (event) {
@@ -197,6 +241,12 @@
 
         loadDraft(form);
         initCategoryCards(form);
+        if (form.elements.person_name) {
+            form.elements.person_name.addEventListener('input', function () {
+                syncPersonFields(form);
+            });
+            syncPersonFields(form);
+        }
         initFileDrop(form);
         initCharCounter(form);
 

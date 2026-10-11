@@ -25,6 +25,10 @@ class Settings {
             'group' => 'general', 'type' => 'bool', 'default' => false,
             'label' => 'Maintenance mode', 'help' => 'When on, only the Super Admin can sign in; everyone else is signed out.',
         ],
+        'school_year_start_month' => [
+            'group' => 'general', 'type' => 'int', 'default' => 8, 'min' => 1, 'max' => 12, 'unit' => '(1 = Jan … 12 = Dec)',
+            'label' => 'School year starts in month', 'help' => 'Used by the OSWD Reports analytics. 8 = August, so SY 2026–2027 runs Aug 2026 to Jul 2027.',
+        ],
         'maintenance_message' => [
             'group' => 'general', 'type' => 'string', 'max' => 255,
             'default' => 'The system is under maintenance. Please try again later.',
@@ -56,6 +60,10 @@ class Settings {
             'group' => 'security', 'type' => 'int', 'default' => 24, 'min' => 1, 'max' => 168, 'unit' => 'hours',
             'label' => 'Lock duration', 'help' => 'How long a locked account stays locked (the Super Admin can unlock sooner).',
         ],
+        'session_idle_minutes' => [
+            'group' => 'security', 'type' => 'int', 'default' => 30, 'min' => 5, 'max' => 240, 'unit' => 'minutes',
+            'label' => 'Sign out after inactivity', 'help' => 'A signed-in user who does nothing for this long is signed out automatically (protects student information on shared computers).',
+        ],
         'user_active_minutes' => [
             'group' => 'security', 'type' => 'int', 'default' => 10, 'min' => 1, 'max' => 120, 'unit' => 'minutes',
             'label' => 'Idle time before "Inactive"', 'help' => 'In User management, a signed-in user idle this long shows as Inactive.',
@@ -74,12 +82,41 @@ class Settings {
             'group' => 'backup', 'type' => 'int', 'default' => 7, 'min' => 1, 'max' => 60, 'unit' => 'backups',
             'label' => 'Keep the newest', 'help' => 'Older automatic backups are deleted. Manual and safety backups are never deleted automatically.',
         ],
+
+        // ---- Programs per department (used for routing to the right Program Coordinator) ----
+        // Defaults are a starting point: the Super Admin edits them to the campus's real programs.
+        'programs_DIT' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['BS Information Technology', 'BS Industrial Technology'],
+            'label' => 'DIT programs', 'help' => 'One program per line.',
+        ],
+        'programs_DCS' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['Information Technology', 'Computer Engineering', 'Computer Science'],
+            'label' => 'DCS programs', 'help' => 'One program per line.',
+        ],
+        'programs_CCJE' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['BS Criminology'],
+            'label' => 'CCJE programs', 'help' => 'One program per line.',
+        ],
+        'programs_DBM' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['BS Business Administration', 'BS Hospitality Management'],
+            'label' => 'DBM programs', 'help' => 'One program per line.',
+        ],
+        'programs_DGTT' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['Bachelor of Elementary Education', 'Bachelor of Secondary Education'],
+            'label' => 'DGTT programs', 'help' => 'One program per line.',
+        ],
     ];
 
     const GROUPS = [
         'general' => ['General', 'gear'],
         'security' => ['Login security', 'shield-lock'],
         'backup' => ['Automatic backups', 'clock-history'],
+        'programs' => ['Programs per department', 'mortarboard'],
     ];
 
     private static $cache = null;
@@ -111,6 +148,9 @@ class Settings {
         return match ($def['type']) {
             'bool' => (bool)(int)$value,
             'int' => (int)$value,
+            // One item per line → array of non-empty, trimmed lines.
+            'lines' => array_values(array_filter(array_map('trim', explode("
+", (string)$value)), 'strlen')),
             default => (string)$value,
         };
     }
@@ -125,6 +165,26 @@ class Settings {
         foreach (self::DEFINITIONS as $key => $def) {
             if ($def['type'] === 'bool') {
                 $new[$key] = !empty($input[$key]);
+                continue;
+            }
+            if ($def['type'] === 'lines') {
+                // One per line; blank lines and repeats (any letter case) are dropped.
+                $lines = [];
+                foreach (preg_split('/\R/', (string)($input[$key] ?? '')) as $line) {
+                    $line = trim($line);
+                    if ($line !== '' && !in_array(mb_strtolower($line), array_map('mb_strtolower', $lines), true)) {
+                        $lines[] = $line;
+                    }
+                }
+                if (!$lines) {
+                    $errors[] = $def['label'] . ': enter at least one.';
+                } elseif (count($lines) > $def['max_lines']) {
+                    $errors[] = $def['label'] . ': at most ' . $def['max_lines'] . ' lines.';
+                } elseif (max(array_map('mb_strlen', $lines)) > $def['max']) {
+                    $errors[] = $def['label'] . ': each line can be up to ' . $def['max'] . ' characters.';
+                } else {
+                    $new[$key] = $lines;
+                }
                 continue;
             }
             $raw = trim((string)($input[$key] ?? ''));
@@ -163,7 +223,8 @@ class Settings {
             if ($old === $value) {
                 continue;
             }
-            $stored = is_bool($value) ? (string)(int)$value : (string)$value;
+            $stored = is_array($value) ? implode("
+", $value) : (is_bool($value) ? (string)(int)$value : (string)$value);
             $stmt->execute([':k' => $key, ':v' => $stored, ':u' => (int)$userId]);
             $changes[$key] = ['from' => self::display($key, $old), 'to' => self::display($key, $value)];
         }
@@ -180,6 +241,9 @@ class Settings {
         $def = self::DEFINITIONS[$key];
         if ($def['type'] === 'bool') {
             return $value ? 'On' : 'Off';
+        }
+        if ($def['type'] === 'lines') {
+            return implode(', ', (array)$value);
         }
         return (string)$value . (isset($def['unit']) ? ' ' . $def['unit'] : '');
     }

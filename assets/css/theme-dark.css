@@ -1,0 +1,196 @@
+/*
+ * Dark mode — page-level styles for the signed-in dashboards.
+ *
+ * Loaded by includes/head.php ONLY when appTheme() === 'dark' (a signed-in
+ * user who chose dark mode). Sign-in and registration pages never load it.
+ *
+ * The cards themselves are switched by data-bs-theme="dark" (rendered by
+ * PHP) and the dark-card rules in style.css. This file darkens everything
+ * around them: the page background, titles, tabs, alerts, menus and
+ * pop-up windows, so no light areas are left.
+ */
+
+body.app-body {
+    /* Bootstrap colours used by components outside the cards */
+    --bs-body-bg: #06101f;
+    --bs-body-color: #dbe5f3;
+    --bs-emphasis-color: #ffffff;
+    --bs-heading-color: #ffffff;
+    --bs-secondary-color: rgba(201, 214, 234, 0.72);
+    --bs-secondary-bg: #0f2244;
+    --bs-tertiary-bg: #0b1a33;
+    --bs-border-color: rgba(255, 255, 255, 0.12);
+    --bs-link-color: #7fb2ff;
+    --bs-link-hover-color: #ffffff;
+    --bs-link-color-rgb: 127, 178, 255;
+    color-scheme: dark;
+
+    background:
+        radial-gradient(90% 60% at 100% 0%, rgba(79, 157, 255, 0.07), transparent 60%),
+        #06101f;
+    color: #dbe5f3;
+}
+
+/* Page title area */
+body.app-body .nemsu-page-header {
+    border-bottom-color: rgba(255, 255, 255, 0.10);
+}
+
+body.app-body .nemsu-page-header h1,
+body.app-body main > h1,
+body.app-body main h1.h2 {
+    color: #ffffff;
+}
+
+body.app-body .nemsu-page-header .text-muted,
+body.app-body .nemsu-page-header p {
+    color: #9fb3d1 !important;
+}
+
+/* The role badge next to the title ("OSWD Admin · ...") */
+body.app-body .nemsu-user-chip {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #dbe5f3;
+}
+
+body.app-body .nemsu-user-chip strong {
+    color: var(--nemsu-gold-300);
+}
+
+/* Outline buttons placed directly on the page (Export CSV, Back, period buttons...) */
+body.app-body main .btn-outline-primary {
+    color: #7fb2ff;
+    border-color: rgba(127, 178, 255, 0.55);
+}
+
+body.app-body main .btn-outline-primary:hover,
+body.app-body main .btn-outline-primary.active,
+body.app-body main .btn-check:checked + .btn-outline-primary {
+    background: #4f9dff;
+    border-color: #4f9dff;
+    color: #04152f;
+}
+
+body.app-body main .btn-outline-secondary {
+    color: #c9d6ea;
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+body.app-body main .btn-outline-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+/* Tabs (e.g. Users: Active accounts / Archived) */
+body.app-body .nav-tabs {
+    --bs-nav-tabs-border-color: rgba(255, 255, 255, 0.12);
+    --bs-nav-tabs-link-hover-border-color: rgba(255, 255, 255, 0.12);
+    --bs-nav-tabs-link-active-bg: #0b1d3a;
+    --bs-nav-tabs-link-active-color: #ffffff;
+    --bs-nav-tabs-link-active-border-color: rgba(255, 255, 255, 0.14) rgba(255, 255, 255, 0.14) #0b1d3a;
+}
+
+body.app-body .nav-tabs .nav-link {
+    color: #9fb3d1;
+}
+
+/* Alerts on the page (info notes, status lines, flash messages) */
+body.app-body .alert {
+    border-color: rgba(255, 255, 255, 0.10);
+}
+
+body.app-body .alert-light {
+    background: rgba(255, 255, 255, 0.05);
+    color: #dbe5f3;
+}
+
+body.app-body .alert-info {
+    background: rgba(56, 189, 248, 0.12);
+    color: #bfe8fb;
+}
+
+body.app-body .alert-success {
+    background: rgba(34, 197, 139, 0.12);
+    color: #b9f0da;
+}
+
+body.app-body .alert-warning {
+    background: rgba(242, 182, 50, 0.13);
+    color: #fbe7b0;
+}
+
+body.app-body .alert-danger {
+    background: rgba(244, 86, 106, 0.13);
+    color: #ffd0d6;
+}
+
+body.app-body .alert a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+/* Navbar user menu and other dropdowns */
+body.app-body .dropdown-menu {
+    --bs-dropdown-bg: #0b1d3a;
+    --bs-dropdown-color: #dbe5f3;
+    --bs-dropdown-border-color: rgba(255, 255, 255, 0.12);
+    --bs-dropdown-link-color: #dbe5f3;
+    --bs-dropdown-link-hover-bg: rgba(255, 255, 255, 0.08);
+    --bs-dropdown-link-hover-color: #ffffff;
+    --bs-dropdown-divider-bg: rgba(255, 255, 255, 0.10);
+}
+
+/* Pop-up windows (e.g. Escalate case) */
+body.app-body .modal-content {
+    background: linear-gradient(165deg, #0b1d3a 0%, #071429 100%);
+    color: #e6edf7;
+    border: 1px solid rgba(120, 160, 230, 0.18);
+}
+
+body.app-body .modal-header,
+body.app-body .modal-footer {
+    border-color: rgba(255, 255, 255, 0.10);
+}
+
+body.app-body .modal .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+body.app-body .modal .form-control,
+body.app-body .modal .form-select {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+    color: #e6edf7;
+}
+
+/* File-a-complaint step indicator (sits above the wizard card) */
+body.app-body .nemsu-wizard-step-indicator {
+    color: #9fb3d1;
+}
+
+body.app-body .nemsu-wizard-step-indicator span {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #dbe5f3;
+}
+
+/* Pagination placed outside a card */
+body.app-body .pagination {
+    --bs-pagination-bg: rgba(255, 255, 255, 0.04);
+    --bs-pagination-color: #7fb2ff;
+    --bs-pagination-border-color: rgba(255, 255, 255, 0.12);
+    --bs-pagination-hover-bg: rgba(255, 255, 255, 0.08);
+    --bs-pagination-hover-color: #ffffff;
+    --bs-pagination-disabled-bg: transparent;
+    --bs-pagination-disabled-color: rgba(201, 214, 234, 0.4);
+    --bs-pagination-active-bg: #2f6fd6;
+    --bs-pagination-active-border-color: #2f6fd6;
+}
+
+/* Small text helpers used directly on the page */
+body.app-body main > .text-muted,
+body.app-body main .small.text-muted {
+    color: #9fb3d1 !important;
+}
+body.app-body .nemsu-doc-viewer { background: rgba(255, 255, 255, 0.03); }

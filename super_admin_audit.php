@@ -46,7 +46,7 @@ $pageSubtitle = 'Permanent, read-only record of Super Admin actions. Entries can
 include 'includes/super_admin_top.php';
 ?>
 
-<form method="GET" class="card nemsu-panel mb-3">
+<form method="GET" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-3">
     <div class="card-body row g-2 align-items-end">
         <div class="col-12 col-md-3">
             <label for="action" class="form-label small">Action</label>
@@ -76,7 +76,7 @@ include 'includes/super_admin_top.php';
     </div>
 </form>
 
-<div class="card nemsu-panel">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
     <div class="card-header d-flex justify-content-between flex-wrap gap-2">
         <span><i class="bi bi-journal-check me-2" aria-hidden="true"></i>Entries (<?php echo $log['total']; ?>)</span>
         <small class="text-muted"><i class="bi bi-lock-fill" aria-hidden="true"></i> Read only</small>

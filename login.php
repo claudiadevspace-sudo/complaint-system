@@ -47,6 +47,12 @@ if (isset($_POST['login'])) {
     } else {
         $username = sanitizeInput($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
+        // An empty form is not a real attempt: don't count it toward the lock.
+        if ($username === '' || $password === '') {
+            $_SESSION['message'] = 'Enter your username and password.';
+            $_SESSION['message_type'] = 'danger';
+            redirect('login.php');
+        }
         $result = $loginAuth->attempt($username, $password);
 
         if (!empty($result['success'])) {
@@ -67,7 +73,11 @@ if (isset($_POST['login'])) {
             'show_student_service' => !empty($result['show_student_service']),
             'username' => $username,
             'until' => time() + (int)($result['retry_after'] ?? 0),
+            'attempts_left' => $result['attempts_left'] ?? null,
         ];
+        // Redirect so refreshing the page can't resend the form and count
+        // as another failed attempt (which could lock the account).
+        redirect('login.php');
     }
 }
 
@@ -184,13 +194,13 @@ if ($authMessage !== null) {
                             <?php echo $isCooldown ? 'Please wait' : 'Sign in'; ?>
                         </button>
                         <?php if ($isCooldown): ?>
-                            <p class="text-center small text-muted mt-3 mb-0" id="loginCooldownTimer" data-seconds="<?php echo (int)$cooldownSeconds; ?>" aria-live="polite">
+                            <p class="text-center small text-muted mt-3 mb-0" id="loginCooldownTimer" data-seconds="<?php echo (int)$cooldownSeconds; ?>" data-warning="<?php echo htmlspecialchars(trim(lockWarning($loginGate['attempts_left'] ?? null)), ENT_QUOTES, 'UTF-8'); ?>" aria-live="polite">
                                 Try again in <?php echo (int)$cooldownSeconds; ?>s
                             </p>
                         <?php endif; ?>
                     </form>
                     <p class="text-center small mt-3 mb-0">
-                        <a href="student_services.php">Need help? Contact Student Services</a>
+                        <a href="forgot_password.php"><i class="bi bi-key me-1" aria-hidden="true"></i>Forgot password?</a>
                     </p>
                     <p class="text-center text-muted small mt-2 mb-0">No account? <a href="register.php">Register as a student</a></p>
                 <?php endif; ?>

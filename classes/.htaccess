@@ -1,0 +1,2 @@
+# Private: never served to the browser (see /.htaccess).
+Require all denied

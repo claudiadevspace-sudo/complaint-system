@@ -151,7 +151,7 @@ function loginRiskBadgeClass($label) {
                     </div>
                 </div>
 
-                <div class="card nemsu-panel">
+                <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <span><i class="bi bi-shield-lock me-2" aria-hidden="true"></i>Recent login events</span>
                         <?php if ($totalEvents > 0): ?>

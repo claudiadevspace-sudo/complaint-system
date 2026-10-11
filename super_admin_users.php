@@ -18,7 +18,8 @@ $tempPassword = null;   // shown once after a password reset, never stored
 
 /** Read the account form fields from POST. */
 function userFormInput() {
-    $fields = ['username', 'email', 'full_name', 'role', 'student_id', 'department', 'program', 'contact_number'];
+    // Student ID is not on the form (the SuperAdmin class keeps the stored one).
+    $fields = ['username', 'email', 'full_name', 'role', 'department', 'program', 'contact_number'];
     $data = [];
     foreach ($fields as $field) {
         $data[$field] = trim((string)($_POST[$field] ?? ''));
@@ -76,13 +77,13 @@ $editing = isset($_GET['edit']) ? $superAdmin->getUser((int)$_GET['edit']) : nul
 $creating = !$editing && isset($_GET['new']);
 $filters = [
     'role' => in_array($_GET['role'] ?? '', allRoles(), true) ? $_GET['role'] : '',
-    'status' => in_array($_GET['status'] ?? '', ['active', 'inactive', 'deactivated'], true) ? $_GET['status'] : '',
+    'status' => in_array($_GET['status'] ?? '', ['active', 'inactive', 'deactivated', 'archived'], true) ? $_GET['status'] : '',
     'department' => in_array($_GET['department'] ?? '', departments(), true) ? $_GET['department'] : '',
     'q' => trim((string)($_GET['q'] ?? '')),
 ];
 // Pre-select role/department when coming from the Overview's "Add" links.
 $prefill = [
-    'role' => in_array($_GET['role'] ?? '', allRoles(), true) ? $_GET['role'] : 'student',
+    'role' => in_array($_GET['role'] ?? '', staffAccountRoles(), true) ? $_GET['role'] : 'program_coordinator',
     'department' => $filters['department'],
 ];
 
@@ -97,7 +98,7 @@ if ($editing || $creating) {
 $pageTitle = 'User management';
 $pageHeading = $editing ? 'Edit account' : ($creating ? 'Create account' : 'User management');
 $pageSubtitle = $editing || $creating
-    ? 'Personnel are assigned to a department and program here.'
+    ? 'Personnel are assigned to a department here (Program Coordinators also to a program).'
     : 'Create, edit, deactivate and reset passwords for every role.';
 $pageActions = $editing || $creating
     ? '<a href="super_admin_users.php" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Back to list</a>'
@@ -122,7 +123,7 @@ include 'includes/super_admin_top.php';
         </div>
     <?php endif; ?>
 
-    <form method="POST" action="super_admin_users.php" class="card nemsu-panel" novalidate>
+    <form method="POST" action="super_admin_users.php" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel" novalidate>
         <?php echo csrfField(); ?>
         <?php if ($editing): ?><input type="hidden" name="user_id" value="<?php echo (int)$editing['user_id']; ?>"><?php endif; ?>
         <div class="card-body row g-3">
@@ -133,14 +134,23 @@ include 'includes/super_admin_top.php';
             <div class="col-md-6">
                 <label for="role" class="form-label">Role <span class="text-danger">*</span></label>
                 <select class="form-select" id="role" name="role" required>
-                    <?php foreach (allRoles() as $role): ?>
+                    <?php
+                    // Staff roles only. When editing a student / Super Admin, their own
+                    // role is listed too so the account can still be saved.
+                    $roleChoices = staffAccountRoles();
+                    if ($editing && !in_array($editing['role'], $roleChoices, true)) {
+                        $roleChoices[] = $editing['role'];
+                    }
+                    ?>
+                    <?php foreach ($roleChoices as $role): ?>
                         <option value="<?php echo $role; ?>" <?php echo ($form['role'] ?? '') === $role ? 'selected' : ''; ?>><?php echo htmlspecialchars(roleLabel($role)); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
             <div class="col-md-6">
                 <label for="username" class="form-label">Username <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="username" name="username" required autocomplete="off" value="<?php echo htmlspecialchars($form['username'] ?? ''); ?>">
+                <input type="text" class="form-control" id="username" name="username" required autocomplete="off" maxlength="100" value="<?php echo htmlspecialchars($form['username'] ?? ''); ?>">
+                <div class="form-text">At least 10 characters.</div>
             </div>
             <div class="col-md-6">
                 <label for="email" class="form-label">Email <span class="text-danger">*</span></label>
@@ -157,16 +167,21 @@ include 'includes/super_admin_top.php';
                         <option value="<?php echo $dept; ?>" <?php echo ($form['department'] ?? '') === $dept ? 'selected' : ''; ?>><?php echo $dept; ?></option>
                     <?php endforeach; ?>
                 </select>
-                <div class="form-text">Required for Program Coordinators and Program Chairpersons.</div>
+                <div class="form-text">Required for Program Coordinators and Department Chairpersons.</div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-6" data-show-for-roles="<?php echo implode(' ', programRoles()); ?>" data-role-field="role">
                 <label for="program" class="form-label">Program</label>
-                <input type="text" class="form-control" id="program" name="program" list="programList" value="<?php echo htmlspecialchars($form['program'] ?? ''); ?>">
-                <datalist id="programList"><?php foreach ($programs as $value): ?><option value="<?php echo htmlspecialchars($value); ?>"><?php endforeach; ?></datalist>
-            </div>
-            <div class="col-md-6">
-                <label for="student_id" class="form-label">Student ID <small class="text-muted">(students only)</small></label>
-                <input type="text" class="form-control" id="student_id" name="student_id" value="<?php echo htmlspecialchars($form['student_id'] ?? ''); ?>">
+                <?php
+                $programSelectId = 'program';
+                $programSelectValue = $form['program'] ?? '';
+                $programSelectDept = $form['department'] ?? '';
+                $programSelectOnly = '';
+                $programSelectFilterBy = 'department';
+                $programSelectRequired = false;
+                $programSelectEmpty = '— None —';
+                include 'includes/program_select.php';
+                ?>
+                <div class="form-text">The program this coordinator handles complaints for. Leave empty to cover the whole department.</div>
             </div>
             <div class="col-md-6">
                 <label for="contact_number" class="form-label">Contact number</label>
@@ -176,12 +191,23 @@ include 'includes/super_admin_top.php';
             <?php if ($creating): ?>
                 <div class="col-md-6">
                     <label for="password" class="form-label">Password <span class="text-danger">*</span></label>
-                    <input type="password" class="form-control" id="password" name="password" required autocomplete="new-password">
+                    <!-- Eye button shows/hides what was typed (handled by assets/js/auth.js) -->
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="password" name="password" required autocomplete="new-password">
+                        <button type="button" class="btn btn-outline-secondary" data-toggle-password="password" aria-label="Show password" title="Show / hide password">
+                            <i class="bi bi-eye" aria-hidden="true"></i>
+                        </button>
+                    </div>
                     <div class="form-text">At least 12 characters with upper and lower case, a number and a symbol.</div>
                 </div>
                 <div class="col-md-6">
                     <label for="password_confirm" class="form-label">Confirm password <span class="text-danger">*</span></label>
-                    <input type="password" class="form-control" id="password_confirm" name="password_confirm" required autocomplete="new-password">
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="password_confirm" name="password_confirm" required autocomplete="new-password">
+                        <button type="button" class="btn btn-outline-secondary" data-toggle-password="password_confirm" aria-label="Show password" title="Show / hide password">
+                            <i class="bi bi-eye" aria-hidden="true"></i>
+                        </button>
+                    </div>
                 </div>
             <?php elseif (!empty($editing['alias'])): ?>
                 <div class="col-12">
@@ -199,7 +225,7 @@ include 'includes/super_admin_top.php';
 
 <?php else: ?>
     <!-- ================= LIST ================= -->
-    <form method="GET" class="card nemsu-panel mb-3">
+    <form method="GET" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-3">
         <div class="card-body row g-2 align-items-end">
             <div class="col-12 col-md-3">
                 <label for="q" class="form-label small">Search</label>
@@ -230,6 +256,7 @@ include 'includes/super_admin_top.php';
                     <option value="active" <?php echo $filters['status'] === 'active' ? 'selected' : ''; ?>>Active</option>
                     <option value="inactive" <?php echo $filters['status'] === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
                     <option value="deactivated" <?php echo $filters['status'] === 'deactivated' ? 'selected' : ''; ?>>Deactivated</option>
+                    <option value="archived" <?php echo $filters['status'] === 'archived' ? 'selected' : ''; ?>>Archived (by OSWD)</option>
                 </select>
             </div>
             <div class="col-12 col-md-3 d-flex gap-2">
@@ -239,7 +266,7 @@ include 'includes/super_admin_top.php';
         </div>
     </form>
 
-    <div class="card nemsu-panel">
+    <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
         <div class="card-header"><i class="bi bi-people me-2" aria-hidden="true"></i>Accounts (<?php echo count($users); ?>)</div>
         <div class="card-body p-0">
             <?php if (!$users): ?>
@@ -254,7 +281,7 @@ include 'includes/super_admin_top.php';
                             <?php foreach ($users as $u): ?>
                                 <?php $isSelf = (int)$u['user_id'] === (int)$_SESSION['user_id']; ?>
                                 <?php $presence = userPresence($u); ?>
-                                <tr class="<?php echo $presence === 'deactivated' ? 'text-muted' : ''; ?>">
+                                <tr class="<?php echo in_array($presence, ['deactivated', 'archived'], true) ? 'text-muted' : ''; ?>">
                                     <td>
                                         <div><?php echo htmlspecialchars($u['full_name']); ?></div>
                                         <div class="small text-muted"><?php echo htmlspecialchars($u['email']); ?></div>
@@ -265,7 +292,7 @@ include 'includes/super_admin_top.php';
                                     <td><small><?php echo htmlspecialchars(trim(($u['department'] ?? '') . ' / ' . ($u['program'] ?? ''), ' /') ?: '—'); ?></small></td>
                                     <td>
                                         <!-- Active = signed in now; Inactive = logged out or idle 10+ min; Deactivated = account off -->
-                                        <span class="badge bg-<?php echo ['active' => 'success', 'inactive' => 'secondary', 'deactivated' => 'danger'][$presence]; ?>">
+                                        <span class="badge bg-<?php echo ['active' => 'success', 'inactive' => 'secondary', 'deactivated' => 'danger', 'archived' => 'dark'][$presence]; ?>">
                                             <?php if ($presence === 'active'): ?><i class="bi bi-circle-fill me-1" style="font-size:.5rem;vertical-align:middle" aria-hidden="true"></i><?php endif; ?>
                                             <?php echo ucfirst($presence); ?>
                                         </span>

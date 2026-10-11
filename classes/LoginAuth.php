@@ -13,7 +13,21 @@ class LoginAuth {
         $username = trim((string)$username);
         $context = $this->captureContext();
         $lockout = new AccountLockout();
-        $gate = $lockout->inspect($username);
+
+        // Super Admin accounts are never put on cooldown, warned or locked:
+        // a wrong password only says "Invalid credentials!" (the failed try is
+        // still written to the sign-in history for monitoring).
+        $target = $lockout->findUser($username);
+        if ($target && ($target['role'] ?? '') === 'super_admin') {
+            $user = $this->findActiveUser($username);
+            if (!$user || !password_verify($password, $user['password'])) {
+                $this->logEvent((int)$target['user_id'], $username, false, 'invalid_credentials', $context, null);
+                return ['success' => false, 'lockout' => null, 'retry_after' => 0, 'message' => 'Invalid credentials!'];
+            }
+            $gate = ['allowed' => true];
+        } else {
+            $gate = $lockout->inspect($username);
+        }
 
         if (empty($gate['allowed'])) {
             $reason = ($gate['type'] ?? '') === 'blocked' ? 'account_blocked' : 'login_cooldown';
@@ -22,6 +36,7 @@ class LoginAuth {
                 'success' => false,
                 'lockout' => $gate['type'],
                 'retry_after' => $gate['retry_after'],
+                'attempts_left' => $gate['attempts_left'] ?? null,
                 'show_student_service' => !empty($gate['show_student_service']),
                 'message' => $gate['message'],
             ];
@@ -36,6 +51,7 @@ class LoginAuth {
                 'success' => false,
                 'lockout' => ($fail['type'] ?? 'invalid') !== 'invalid' ? $fail['type'] : null,
                 'retry_after' => $fail['retry_after'] ?? 0,
+                'attempts_left' => $fail['attempts_left'] ?? null,
                 'show_student_service' => !empty($fail['show_student_service']),
                 'message' => $fail['message'] ?? 'Invalid credentials!',
             ];
@@ -209,6 +225,9 @@ class LoginAuth {
         $_SESSION['full_name'] = $user['full_name'];
         $_SESSION['role'] = $user['role'];
         $_SESSION['email'] = $user['email'];
+        // For the automatic sign-out (config.php: idle and 12-hour limits).
+        $_SESSION['signed_in_at'] = time();
+        $_SESSION['last_activity'] = time();
     }
 
     private function createOtpChallenge(array $user, $isResend = false) {

@@ -67,7 +67,7 @@ include 'includes/super_admin_top.php';
 <div class="row g-4 mb-4">
     <!-- Open complaints at each escalation level -->
     <div class="col-lg-6">
-        <div class="card nemsu-panel h-100">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel h-100">
             <div class="card-header"><i class="bi bi-diagram-3 me-2" aria-hidden="true"></i>Open complaints per escalation level</div>
             <ul class="list-group list-group-flush">
                 <?php foreach ($overview['pending_by_level'] as $level => $count): ?>
@@ -90,7 +90,7 @@ include 'includes/super_admin_top.php';
 
     <!-- Users per role -->
     <div class="col-lg-6">
-        <div class="card nemsu-panel h-100">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel h-100">
             <div class="card-header"><i class="bi bi-people me-2" aria-hidden="true"></i>Users per role</div>
             <ul class="list-group list-group-flush">
                 <?php foreach ($overview['users_by_role'] as $role => $counts): ?>
@@ -112,7 +112,7 @@ include 'includes/super_admin_top.php';
 </div>
 
 <!-- Personnel per department: shows which departments still need accounts -->
-<div class="card nemsu-panel mb-4">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
     <div class="card-header"><i class="bi bi-building me-2" aria-hidden="true"></i>Personnel per department</div>
     <div class="card-body p-0">
         <div class="table-responsive nemsu-table-wrap">
@@ -153,7 +153,7 @@ include 'includes/super_admin_top.php';
 </div>
 
 <!-- Complaints by category -->
-<div class="card nemsu-panel mb-4">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
     <div class="card-header"><i class="bi bi-tags me-2" aria-hidden="true"></i>Complaints by category</div>
     <div class="card-body p-0">
         <?php if (!$overview['by_category']): ?>

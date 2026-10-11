@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     status ENUM('active', 'inactive') DEFAULT 'active',  -- account switch: inactive = cannot sign in
     last_activity_at DATETIME NULL,  -- last page opened while signed in ("last seen")
-    is_signed_in TINYINT(1) NOT NULL DEFAULT 0  -- 0 after logout; drives Active/Inactive in User management
+    is_signed_in TINYINT(1) NOT NULL DEFAULT 0,  -- 0 after logout; drives Active/Inactive in User management
+    archived_at DATETIME NULL,  -- archived by OSWD (kept, cannot sign in, can be restored)
+    archived_by INT NULL,
+    INDEX idx_users_archived (archived_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===================================================================
@@ -41,15 +44,17 @@ CREATE TABLE IF NOT EXISTS complaints (
     complainant_id INT NOT NULL,
     respondent_name VARCHAR(200),
     respondent_type ENUM('faculty', 'staff', 'student', 'other'),
+    respondent_details VARCHAR(255) NULL, -- short description of the person involved
     complaint_title VARCHAR(255) NOT NULL,
     complaint_description TEXT NOT NULL,
     complaint_category VARCHAR(100),
     predicted_category VARCHAR(100),
     complaint_type ENUM('behavioral','services') NOT NULL DEFAULT 'behavioral',
     department VARCHAR(20) NULL,  -- complainant's department when submitted; used for routing
+    program VARCHAR(100) NULL,    -- complainant's program when submitted; routes to that program's coordinator
     incident_date DATE NOT NULL,
     incident_location VARCHAR(255),
-    severity ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+    severity VARCHAR(10) NOT NULL DEFAULT '6', -- 1-6, from the nature (severityByNature)
     status ENUM('pending', 'under_review', 'investigating', 'resolved', 'rejected', 'escalated') DEFAULT 'pending',
     supporting_documents TEXT,
     assigned_to INT,
@@ -94,6 +99,7 @@ CREATE TABLE IF NOT EXISTS complaint_comments (
     comment_id INT AUTO_INCREMENT PRIMARY KEY,
     complaint_id INT NOT NULL,
     user_id INT NOT NULL,
+    staff_id INT NULL, -- the staff member this conversation is with (private thread)
     comment_text TEXT NOT NULL,
     is_internal BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -266,6 +272,8 @@ CREATE TABLE IF NOT EXISTS enrolled_students (
     full_name VARCHAR(200) NULL,
     department VARCHAR(20) NULL,
     program VARCHAR(100) NULL,
+    email VARCHAR(100) NULL,          -- used to create the account at registration
+    contact_number VARCHAR(20) NULL,
     uploaded_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -287,6 +295,27 @@ CREATE TABLE IF NOT EXISTS system_settings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===================================================================
+-- TABLE: complaint_resolution_proofs
+-- Description: Proof uploaded by staff before resolving a complaint. The
+-- student must approve the latest proof before the complaint can be resolved.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS complaint_resolution_proofs (
+    proof_id INT AUTO_INCREMENT PRIMARY KEY,
+    complaint_id INT NOT NULL,
+    uploaded_by INT NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    original_name VARCHAR(255) NULL,
+    note TEXT NOT NULL,
+    status ENUM('pending','approved','rejected','replaced') NOT NULL DEFAULT 'pending',
+    student_response TEXT NULL,
+    responded_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_proofs_complaint (complaint_id, proof_id),
+    FOREIGN KEY (complaint_id) REFERENCES complaints(complaint_id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===================================================================
 -- DEFAULT DATA: Complaint Categories
 -- ===================================================================
 INSERT IGNORE INTO complaint_categories (category_name, category_description) VALUES
@@ -305,7 +334,7 @@ INSERT IGNORE INTO complaint_categories (category_name, category_description) VA
 INSERT IGNORE INTO users (username, email, password, full_name, role, status) VALUES
 ('admin', 'oswd@nemsu.edu', '$2y$10$Q49BTnExRLAm2rrvq4Gm4.w.A9c9ULH0kUATFoIFGrE7n5JeDKZjy', 'OSWD Administrator', 'oswd', 'active'),
 ('coordinator', 'coordinator@nemsu.edu', '$2y$10$PPiQfoG62n8uoMZn9EXER.lGccNMxuBuaICIjchkIR5P5Y1mogqWu', 'Program Coordinator', 'program_coordinator', 'active'),
-('chairperson', 'chairperson@nemsu.edu', '$2y$10$gzEwzSOrzUK/hGI18GRLketjF7ST2F3nOw/xTxvtiP4UWzCRswHam', 'Program Chairperson', 'department_chair', 'active'),
+('chairperson', 'chairperson@nemsu.edu', '$2y$10$gzEwzSOrzUK/hGI18GRLketjF7ST2F3nOw/xTxvtiP4UWzCRswHam', 'Department Chairperson', 'department_chair', 'active'),
 ('counselor', 'counselor@nemsu.edu', '$2y$10$/O7z2edOJUkcq81Rnvw52OY3eRZH5aUBAxWt0scgTAarYpxMU5/XS', 'Guidance Counselor', 'guidance_office', 'active'),
 ('oswdadmin', 'oswdadmin@nemsu.edu', '$2y$10$fuIeFJswJEByZd4kfVMjbuVTMG3qvGget65/9f3eMUqOkV8XZzLLG', 'OSWD Administrator', 'oswd', 'active');
 
@@ -324,3 +353,12 @@ CREATE INDEX idx_notifications_created ON notifications(created_at);
 -- ===================================================================
 -- END OF DATABASE SCHEMA
 -- ===================================================================
+
+-- Server-side rate limits (hashed email / IP keys), see rateLimitExceeded()
+CREATE TABLE IF NOT EXISTS security_rate_limits (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    action VARCHAR(40) NOT NULL,
+    key_hash CHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_rate_lookup (action, key_hash, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

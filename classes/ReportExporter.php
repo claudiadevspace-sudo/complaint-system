@@ -37,7 +37,7 @@ class ReportExporter {
             $r['complaint_type'] === 'services' ? 'Service' : 'Person',
             workflowLevelLabel($r['current_level']),
             formatStatus($r['status']),
-            ucfirst((string)$r['severity']),
+            severityMeta($r['severity'])['label'],
             (string)$r['complainant_alias'],
         ];
     }
@@ -246,6 +246,161 @@ class ReportExporter {
 
         self::$pages[] = self::$ops;
         return self::buildPdf();
+    }
+
+    /* ==============================================================
+     * ANALYTICS PDF — line graph of complaints per category or per status
+     * (data from ComplaintAnalytics::data(); same colors as the web chart)
+     * ============================================================== */
+
+    public static function analyticsPdf(array $data, array $meta) {
+        self::$pages = [];
+        self::$ops = '';
+        self::newPage();
+        $left = self::MARGIN;
+        $right = self::PAGE_W - self::MARGIN;
+
+        // ---- Title block ----
+        $dimension = $data['dimension_label'] ?? 'Category';   // "Category" or "Status"
+        self::text($left, 'Complaint Analytics by ' . $dimension, 16, true);
+        self::$y += 4;
+        self::text($left, $data['school_year'] . '  ·  ' . $data['period'], 11, true);
+        self::text($left, 'Total complaints: ' . $data['total'] . '   ·   Generated ' . $meta['generated'] . ' by ' . $meta['by'], 9);
+        self::$y += 10;
+
+        // ---- Chart area (legend on the right) ----
+        $plotLeft = $left + 28;
+        $plotRight = $right - 190;
+        $plotTop = self::$y;
+        $plotBottom = $plotTop + 210;
+        $count = count($data['labels']);
+        $max = 0;
+        foreach ($data['series'] as $values) {
+            $max = max($max, ...$values);
+        }
+        // "Nice" y-axis: about 5 steps of a whole number.
+        $step = max(1, (int)ceil(max(1, $max) / 5));
+        $yMax = $step * max(1, (int)ceil(max(1, $max) / $step));
+        $xAt = fn($i) => $count > 1 ? $plotLeft + ($plotRight - $plotLeft) * $i / ($count - 1) : ($plotLeft + $plotRight) / 2;
+        $yAt = fn($v) => $plotBottom - ($plotBottom - $plotTop) * $v / $yMax;
+
+        // Horizontal grid lines + y labels.
+        for ($v = 0; $v <= $yMax; $v += $step) {
+            self::line($plotLeft, $yAt($v), $plotRight, $yAt($v), $v === 0 ? 0.4 : 0.88);
+            self::textAt($plotLeft - 6 - strlen((string)$v) * 4.2, $yAt($v) - 3.5, (string)$v, 7);
+        }
+        // X labels; in month view (28–31 points) show every other day if crowded.
+        $every = ($plotRight - $plotLeft) / max(1, $count - 1) < 14 ? 2 : 1;
+        foreach ($data['labels'] as $i => $label) {
+            if ($i % $every !== 0 && $i !== $count - 1) {
+                continue;
+            }
+            // "Aug 2026" → "Aug '26" to fit under the axis.
+            $short = preg_replace('/^(\w{3}) \d\d(\d\d)$/', "$1 '$2", $label);
+            self::textAt($xAt($i) - strlen($short) * 1.9, $plotBottom + 5, $short, 7);
+        }
+
+        // One colored line per category, with a small square at each point.
+        foreach ($data['series'] as $category => $values) {
+            $points = [];
+            foreach ($values as $i => $v) {
+                $points[] = [$xAt($i), $yAt($v)];
+            }
+            self::polyline($points, $data['colors'][$category], 1.6);
+            foreach ($points as [$px, $py]) {
+                self::fillRect($px - 1.6, $py - 1.6, 3.2, 3.2, $data['colors'][$category]);
+            }
+        }
+
+        // Legend: color, category, total.
+        $ly = $plotTop;
+        foreach ($data['series'] as $category => $values) {
+            self::fillRect($plotRight + 16, $ly + 3, 14, 3, $data['colors'][$category]);
+            self::textAt($plotRight + 36, $ly, self::fit($category, 120, 8), 8);
+            self::textAt($right - 14, $ly, (string)$data['summary'][$category]['total'], 8, true);
+            $ly += 16;
+        }
+
+        // ---- Table under the chart ----
+        self::$y = $plotBottom + 30;
+        if ($data['view'] === 'year') {
+            // Category × month matrix, plus total.
+            $catW = 170;
+            $colW = ($right - $left - $catW - 44) / max(1, $count);
+            self::textAt($left, self::$y, $dimension, 8, true);
+            foreach ($data['labels'] as $i => $label) {
+                self::textAt($left + $catW + $colW * $i, self::$y, substr($label, 0, 3), 8, true);
+            }
+            self::textAt($right - 34, self::$y, 'Total', 8, true);
+            self::$y += 13;
+            self::line($left, self::$y - 3, $right, self::$y - 3, 0.3);
+            foreach ($data['series'] as $category => $values) {
+                self::fillRect($left, self::$y + 1, 6, 6, $data['colors'][$category]);
+                self::textAt($left + 10, self::$y, self::fit($category, $catW - 14, 8), 8);
+                foreach ($values as $i => $v) {
+                    self::textAt($left + $catW + $colW * $i, self::$y, (string)$v, 8);
+                }
+                self::textAt($right - 34, self::$y, (string)$data['summary'][$category]['total'], 8, true);
+                self::$y += 13;
+            }
+        } else {
+            // Month view: one row per category with its busiest day.
+            $cols = [$dimension => 0, 'Type' => 230, 'Total' => 300, 'Busiest day' => 360, 'Complaints that day' => 460, 'Share of total' => 580];
+            if (($data['dimension'] ?? 'category') === 'status') {
+                unset($cols['Type']);   // person/service type only applies to categories
+            }
+            foreach ($cols as $title => $x) {
+                self::textAt($left + $x, self::$y, $title, 8, true);
+            }
+            self::$y += 13;
+            self::line($left, self::$y - 3, $right, self::$y - 3, 0.3);
+            foreach ($data['summary'] as $category => $s) {
+                self::fillRect($left, self::$y + 1, 6, 6, $data['colors'][$category]);
+                self::textAt($left + 10, self::$y, self::fit($category, 215, 8), 8);
+                self::textAt($left + 230, self::$y, (string)$s['type'], 8);
+                self::textAt($left + 300, self::$y, (string)$s['total'], 8, true);
+                self::textAt($left + 360, self::$y, $s['peak_label'], 8);
+                self::textAt($left + 460, self::$y, (string)$s['peak_count'], 8);
+                self::textAt($left + 580, self::$y, $s['share'] . '%', 8);
+                self::$y += 13;
+            }
+        }
+        if ($data['total'] === 0) {
+            self::$y += 6;
+            self::textAt($left, self::$y, 'No complaints were submitted in this period.', 9);
+        }
+
+        self::$pages[] = self::$ops;
+        return self::buildPdf();
+    }
+
+    /** Text at an exact position (top-down y), without moving the cursor. */
+    private static function textAt($x, $yTop, $string, $size, $bold = false) {
+        self::$ops .= sprintf("BT /%s %d Tf %.2F %.2F Td (%s) Tj ET\n",
+            $bold ? 'F2' : 'F1', $size, $x, self::PAGE_H - $yTop - $size, self::escape($string));
+    }
+
+    /** "#1565c0" → "0.08 0.40 0.75" (PDF color numbers from 0 to 1). */
+    private static function rgb($hex) {
+        $hex = ltrim($hex, '#');
+        return sprintf('%.3F %.3F %.3F', hexdec(substr($hex, 0, 2)) / 255, hexdec(substr($hex, 2, 2)) / 255, hexdec(substr($hex, 4, 2)) / 255);
+    }
+
+    /** A connected line through the points, in the given color (RG = stroke color). */
+    private static function polyline(array $points, $hex, $width) {
+        if (count($points) < 2) {
+            return;
+        }
+        $ops = sprintf('%s RG %.2F w 1 J 1 j ', self::rgb($hex), $width);
+        foreach ($points as $i => [$x, $y]) {
+            $ops .= sprintf('%.2F %.2F %s ', $x, self::PAGE_H - $y, $i === 0 ? 'm' : 'l');
+        }
+        self::$ops .= $ops . "S 0 G\n";
+    }
+
+    /** A filled rectangle (rg = fill color); used for points and legend keys. */
+    private static function fillRect($x, $yTop, $w, $h, $hex) {
+        self::$ops .= sprintf("%s rg %.2F %.2F %.2F %.2F re f 0 g\n", self::rgb($hex), $x, self::PAGE_H - $yTop - $h, $w, $h);
     }
 
     private static function tableHeader(array $widths) {

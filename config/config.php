@@ -9,6 +9,14 @@ ini_set('session.use_only_cookies', '1');
 ini_set('session.cookie_httponly', '1');
 ini_set('session.cookie_samesite', 'Lax');
 ini_set('session.use_strict_mode', '1');
+ini_set('session.cookie_lifetime', '0');          // gone when the browser closes
+ini_set('session.sid_length', '48');
+ini_set('session.sid_bits_per_character', '6');
+// Over HTTPS (e.g. a deployed server) the cookie is never sent over plain HTTP.
+if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')) {
+    ini_set('session.cookie_secure', '1');
+}
 
 // Start session if not already started
 if (session_status() === PHP_SESSION_NONE) {
@@ -91,15 +99,26 @@ define('LOGIN_RESET_TTL', 3600);
 // Timezone
 date_default_timezone_set('Asia/Manila');
 
-// Error reporting (disable in production)
+// Errors: never shown to visitors in the browser (they can reveal file paths
+// and SQL); they go to the PHP error log instead. Command-line scripts
+// (migrations, backups) still print them.
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', PHP_SAPI === 'cli' ? '1' : '0');
+ini_set('log_errors', '1');
 
 if (!headers_sent()) {
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: DENY');
     header('Referrer-Policy: same-origin');
     header('X-XSS-Protection: 1; mode=block');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()');
+    header('Cross-Origin-Opener-Policy: same-origin');
+    if (isset($_SESSION['user_id'])) {
+        // Pages with student information are never cached, so Back after
+        // logging out (or on a shared computer) cannot show them again.
+        header('Cache-Control: no-store, no-cache, must-revalidate, private');
+        header('Pragma: no-cache');
+    }
     header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'");
 }
 
@@ -111,6 +130,39 @@ if (!headers_sent()) {
  * has passed. Logging out clears it at once (see logout.php).
  */
 define('USER_ACTIVE_WINDOW', Settings::get('user_active_minutes') * 60);
+
+/*
+ * Automatic sign-out. A session ends after SESSION_IDLE_SECONDS without the
+ * user opening a page or submitting a form (Super Admin → Settings), and in
+ * any case SESSION_MAX_SECONDS after signing in. The live-update check
+ * (live_status.php) runs in the background, so it does NOT count as activity:
+ * a tab left open on a shared computer still signs out.
+ */
+define('SESSION_IDLE_SECONDS', Settings::get('session_idle_minutes') * 60);
+define('SESSION_MAX_SECONDS', 12 * 3600);
+
+if (isset($_SESSION['user_id']) && PHP_SAPI !== 'cli') {
+    $now = time();
+    $lastActivity = (int)($_SESSION['last_activity'] ?? $now);
+    $signedInAt = (int)($_SESSION['signed_in_at'] ?? $now);
+    $_SESSION['signed_in_at'] = $signedInAt;
+    if ($now - $lastActivity > SESSION_IDLE_SECONDS || $now - $signedInAt > SESSION_MAX_SECONDS) {
+        $expiredUserId = (int)$_SESSION['user_id'];
+        try {
+            Database::getInstance()->getConnection()
+                ->prepare('UPDATE users SET is_signed_in = 0 WHERE user_id = :id')
+                ->execute([':id' => $expiredUserId]);
+        } catch (PDOException $e) {
+            // Never block signing out.
+        }
+        $_SESSION = [];
+        session_regenerate_id(true);
+        $_SESSION['message'] = 'You were signed out because of inactivity. Please sign in again.';
+        $_SESSION['message_type'] = 'warning';
+    } elseif (basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'live_status.php') {
+        $_SESSION['last_activity'] = $now;
+    }
+}
 
 if (isset($_SESSION['user_id']) && PHP_SAPI !== 'cli') {
     // Write at most once a minute per session, not on every page load.
@@ -153,7 +205,25 @@ if (MAINTENANCE_MODE && isset($_SESSION['user_id']) && ($_SESSION['role'] ?? '')
 }
 
 /**
+ * Light / dark mode for the signed-in dashboards ('light' or 'dark').
+ *
+ * The choice is kept in the 'nemsu_theme' cookie (set by assets/js/theme.js
+ * when the navbar toggle is pressed) and the page is rendered in that mode
+ * on the server, so it never flashes the wrong colours while loading.
+ * Default: dark. Sign-in, registration and other public pages are always
+ * light: the mode only applies while someone is signed in.
+ */
+function appTheme() {
+    if (!isLoggedIn()) {
+        return 'light';
+    }
+    $saved = $_COOKIE['nemsu_theme'] ?? '';
+    return in_array($saved, ['light', 'dark'], true) ? $saved : 'dark';
+}
+
+/**
  * Status shown in User management:
+ *   'archived'    — archived by OSWD (hidden from their list, cannot sign in)
  *   'deactivated' — account switched off by the Super Admin (cannot sign in)
  *   'active'      — signed in and used the system in the last 10 minutes
  *   'inactive'    — logged out, or idle longer than that
@@ -163,6 +233,9 @@ if (MAINTENANCE_MODE && isset($_SESSION['user_id']) && ($_SESSION['role'] ?? '')
 define('USER_RECENTLY_ACTIVE_SQL', '(is_signed_in = 1 AND last_activity_at IS NOT NULL AND last_activity_at >= NOW() - INTERVAL ' . USER_ACTIVE_WINDOW . ' SECOND)');
 
 function userPresence(array $user) {
+    if (!empty($user['archived_at'])) {
+        return 'archived';
+    }
     if (($user['status'] ?? '') !== 'active') {
         return 'deactivated';
     }
@@ -274,17 +347,17 @@ function complaintCategoryCards() {
             'route' => 'Starts with your Program Coordinator',
         ],
         [
-            'name' => 'Institutional Rules Violation',
-            'type' => 'behavioral',
-            'icon' => 'bi-journal-x',
-            'example' => 'Breaking campus policies or code of conduct',
-            'route' => 'Starts with your Program Coordinator',
-        ],
-        [
             'name' => 'Teaching Standards Failure',
             'type' => 'behavioral',
             'icon' => 'bi-easel',
             'example' => 'Unprepared classes, unfair grading, poor communication',
+            'route' => 'Starts with your Program Coordinator',
+        ],
+        [
+            'name' => 'Institutional Rules Violation',
+            'type' => 'behavioral',
+            'icon' => 'bi-journal-x',
+            'example' => 'Breaking campus policies or code of conduct',
             'route' => 'Starts with your Program Coordinator',
         ],
         [
@@ -312,8 +385,46 @@ function allowedRespondentTypes() {
     return ['faculty', 'staff', 'student', 'other'];
 }
 
+/**
+ * Severity is decided by the nature of the complaint only (the student does
+ * not choose it). Severity 1 is the most serious.
+ */
+function severityByNature() {
+    return [
+        '1' => 'Academic Integrity Violation',
+        '2' => 'Unprofessional Behavior',
+        '3' => 'Teaching Standards Failure',
+        '4' => 'Institutional Rules Violation',
+        '5' => 'Campus Services',
+        '6' => 'Campus Facilities',
+    ];
+}
+
 function allowedSeverities() {
-    return ['low', 'medium', 'high', 'critical'];
+    return array_map('strval', array_keys(severityByNature()));
+}
+
+/** The severity ('1'–'6') for a complaint category. */
+function severityForCategory($category) {
+    $level = array_search((string)$category, severityByNature(), true);
+    return $level === false ? '6' : (string)$level;
+}
+
+/** Severity 1 and 2 need attention first (warning banners, red rows). */
+function isUrgentSeverity($severity) {
+    return in_array(normalizeSeverity($severity), ['1', '2'], true);
+}
+
+/** Old values (low/medium/high/critical) from before severity followed the nature. */
+function normalizeSeverity($severity) {
+    $severity = (string)$severity;
+    return match ($severity) {
+        'critical' => '1',
+        'high' => '2',
+        'medium' => '4',
+        'low' => '6',
+        default => in_array($severity, allowedSeverities(), true) ? $severity : '6',
+    };
 }
 
 function staffRoles() {
@@ -330,6 +441,19 @@ function allRoles() {
 }
 
 /**
+ * Roles the Super Admin can create in User management. Students register
+ * themselves, and the Super Admin account is not created from the form.
+ */
+function staffAccountRoles() {
+    return ['program_coordinator', 'department_chair', 'guidance_office', 'oswd'];
+}
+
+/** Roles that have a program: a coordinator handles one, a student studies one. */
+function programRoles() {
+    return ['program_coordinator', 'student'];
+}
+
+/**
  * The campus departments. Accounts created by the Super Admin must use one
  * of these, so every department's personnel are spelled the same way.
  */
@@ -338,11 +462,126 @@ function departments() {
 }
 
 /**
+ * Validate an uploaded image/document and save it in /uploads under a random
+ * name. Same rules as complaint evidence: PDF, JPG, PNG, DOC or DOCX, up to
+ * MAX_FILE_SIZE, and the real file type must match the extension.
+ * Returns ['ok' => true, 'file' => stored name, 'original' => original name]
+ * or ['ok' => false, 'message' => '...'].
+ */
+function saveUploadedDocument($file) {
+    if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        return ['ok' => false, 'message' => 'Choose an image or document to upload.'];
+    }
+    if ($file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+        return ['ok' => false, 'message' => 'File upload failed. Please try again.'];
+    }
+    if ($file['size'] > MAX_FILE_SIZE) {
+        return ['ok' => false, 'message' => 'File is too large. Maximum size is ' . round(MAX_FILE_SIZE / 1048576) . 'MB.'];
+    }
+    $originalName = basename((string)$file['name']);
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    $allowedMimes = [
+        'pdf' => ['application/pdf'],
+        'jpg' => ['image/jpeg'],
+        'jpeg' => ['image/jpeg'],
+        'png' => ['image/png'],
+        'doc' => ['application/msword'],
+        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ];
+    if (!in_array($ext, ALLOWED_EXTENSIONS, true) || !isset($allowedMimes[$ext])) {
+        return ['ok' => false, 'message' => 'Invalid file type. Allowed: PDF, JPG, PNG, DOC, DOCX.'];
+    }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    if (!in_array($mime, $allowedMimes[$ext], true)) {
+        return ['ok' => false, 'message' => 'The uploaded file type does not match its extension.'];
+    }
+    $uploadDir = rtrim(UPLOAD_DIR, '/\\') . DIRECTORY_SEPARATOR;
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, true);
+    }
+    $fileName = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    if (!move_uploaded_file($file['tmp_name'], $uploadDir . $fileName)) {
+        return ['ok' => false, 'message' => 'Failed to save the uploaded file.'];
+    }
+    return ['ok' => true, 'file' => $fileName, 'original' => $originalName];
+}
+
+/** How the document viewer shows a stored file: 'image', 'pdf' or 'other' (Word). */
+function documentKind($fileName) {
+    $ext = strtolower(pathinfo((string)$fileName, PATHINFO_EXTENSION));
+    return in_array($ext, ['jpg', 'jpeg', 'png'], true) ? 'image' : ($ext === 'pdf' ? 'pdf' : 'other');
+}
+
+/**
+ * Official programs of a department (Super Admin → Settings → Programs).
+ * Complaints are routed to the Program Coordinator of the student's program,
+ * so programs are chosen from this list rather than typed freely.
+ */
+function programsFor($department) {
+    $department = strtoupper(trim((string)$department));
+    return in_array($department, departments(), true) ? Settings::get('programs_' . $department) : [];
+}
+
+/**
+ * A program name reduced for comparison: lower case, no punctuation, and
+ * without the degree prefix. "BS in Information Technology" → "information technology".
+ */
+function programKey($program) {
+    $key = mb_strtolower(trim((string)$program));
+    $key = preg_replace('/[^a-z0-9 ]+/', ' ', $key);
+    $key = preg_replace('/^(bachelor of science in|bachelor of science|bachelor of|bs in|bs|bsc|ab)\s+/', '', trim(preg_replace('/\s+/', ' ', $key)));
+    // Joined short forms: "bsit" → "it", "bscs" → "cs".
+    $key = preg_replace('/^bs(?=[a-z]{2,5}$)/', '', trim($key));
+    return trim($key);
+}
+
+/** "information technology" → "it" (ignoring small words like "of", "in", "and"). */
+function programAcronym($key) {
+    $letters = '';
+    foreach (explode(' ', $key) as $word) {
+        if ($word !== '' && !in_array($word, ['of', 'in', 'and', 'the', 'for'], true)) {
+            $letters .= $word[0];
+        }
+    }
+    return $letters;
+}
+
+/**
+ * The official spelling of a program in a department, or null if it is not
+ * on that department's list. Accepts the full name in any letter case, with
+ * or without "BS"/"Bachelor of ...", or its initials:
+ * "it", "BSIT", "BS in Information Technology" → "Information Technology".
+ */
+function canonicalProgram($department, $program) {
+    $wanted = programKey($program);
+    if ($wanted === '') {
+        return null;
+    }
+    $wantedLetters = str_replace(' ', '', $wanted);
+    foreach (programsFor($department) as $official) {
+        $officialKey = programKey($official);
+        if ($officialKey === $wanted || ($wantedLetters !== '' && programAcronym($officialKey) === $wantedLetters)) {
+            return $official;
+        }
+    }
+    return null;
+}
+
+/**
  * Roles that belong to ONE department, so a department is required for
  * them. Guidance, OSWD and the Super Admin serve the whole campus.
  */
 function departmentRoles() {
     return ['program_coordinator', 'department_chair'];
+}
+
+/**
+ * Campus-wide offices shared by all their accounts: every active Guidance
+ * (or OSWD) account sees, handles and is notified about every complaint at
+ * that level, from every department and program.
+ */
+function officeRoles() {
+    return ['guidance_office', 'oswd'];
 }
 
 /**
@@ -410,7 +649,7 @@ function roleLabel($role) {
     return match ($role) {
         'student' => 'Student',
         'program_coordinator' => 'Program Coordinator',
-        'department_chair' => 'Program Chairperson',
+        'department_chair' => 'Department Chairperson',
         'guidance_office' => 'Guidance Counselor',
         'oswd' => 'OSWD Admin',
         'super_admin' => 'Super Admin',
@@ -431,11 +670,11 @@ function dashboardMetaForRole($role) {
         ],
         'program_coordinator' => [
             'title' => 'Program Coordinator Dashboard',
-            'subtitle' => 'Behavioral complaints start here. Escalate to the Program Chair if unresolved.',
+            'subtitle' => 'Behavioral complaints start here. Escalate to the Department Chair if unresolved.',
             'theme' => 'info',
         ],
         'department_chair' => [
-            'title' => 'Program Chairperson Dashboard',
+            'title' => 'Department Chairperson Dashboard',
             'subtitle' => 'Review escalated behavioral complaints. Escalate to Guidance if needed.',
             'theme' => 'secondary',
         ],
@@ -486,12 +725,21 @@ function statusMeta($status) {
 }
 
 function severityMeta($severity) {
-    return match ((string)$severity) {
-        'critical' => ['bootstrap' => 'danger', 'icon' => 'bi-exclamation-octagon-fill', 'label' => 'Critical'],
-        'high' => ['bootstrap' => 'danger', 'icon' => 'bi-exclamation-triangle-fill', 'label' => 'High'],
-        'medium' => ['bootstrap' => 'warning', 'icon' => 'bi-dash-circle-fill', 'label' => 'Medium'],
-        default => ['bootstrap' => 'secondary', 'icon' => 'bi-circle', 'label' => 'Low'],
+    $level = normalizeSeverity($severity);
+    $nature = severityByNature()[$level];
+    [$bootstrap, $icon] = match ($level) {
+        '1' => ['danger', 'bi-exclamation-octagon-fill'],
+        '2' => ['danger', 'bi-exclamation-triangle-fill'],
+        '3', '4' => ['warning', 'bi-dash-circle-fill'],
+        default => ['secondary', 'bi-circle'],
     };
+    return [
+        'bootstrap' => $bootstrap,
+        'icon' => $icon,
+        'label' => 'Severity ' . $level,
+        'long' => 'Severity ' . $level . ' · ' . $nature,
+        'nature' => $nature,
+    ];
 }
 
 function statusBadgeHtml($status) {
@@ -503,7 +751,7 @@ function statusBadgeHtml($status) {
 
 function severityBadgeHtml($severity) {
     $m = severityMeta($severity);
-    return '<span class="badge nemsu-badge bg-' . htmlspecialchars($m['bootstrap'], ENT_QUOTES, 'UTF-8') . '">'
+    return '<span class="badge nemsu-badge bg-' . htmlspecialchars($m['bootstrap'], ENT_QUOTES, 'UTF-8') . '" title="' . htmlspecialchars($m['long'], ENT_QUOTES, 'UTF-8') . '">'
         . '<i class="bi ' . htmlspecialchars($m['icon'], ENT_QUOTES, 'UTF-8') . '" aria-hidden="true"></i> '
         . '<span>' . htmlspecialchars($m['label'], ENT_QUOTES, 'UTF-8') . '</span></span>';
 }
@@ -631,7 +879,7 @@ function complaintProgressSteps(array $complaint) {
         $steps = [
             ['id' => 'submitted', 'label' => 'Submitted'],
             ['id' => 'program_coordinator', 'label' => 'Program Coordinator'],
-            ['id' => 'department_chair', 'label' => 'Program Chair'],
+            ['id' => 'department_chair', 'label' => 'Department Chair'],
             ['id' => 'guidance_office', 'label' => 'Guidance Counselor'],
             ['id' => 'oswd', 'label' => 'OSWD Admin'],
             ['id' => 'outcome', 'label' => 'Final Decision'],
@@ -723,4 +971,184 @@ function filterTimelineForDisplay(array $timeline) {
 
     return $filtered;
 }
-?>
+
+/**
+ * " If the next attempt also fails, your account will be locked." (or "... 2
+ * more failed attempts ..."), from the attempts left before the lock. Empty
+ * when unknown.
+ */
+function lockWarning($attemptsLeft) {
+    if ($attemptsLeft === null || (int)$attemptsLeft <= 0) {
+        return '';
+    }
+    return (int)$attemptsLeft === 1
+        ? ' If the next attempt also fails, your account will be locked.'
+        : ' Your account will be locked after ' . (int)$attemptsLeft . ' more failed attempts.';
+}
+
+/**
+ * What the signed-in user can currently see, for live updates without a
+ * manual refresh (live_status.php + assets/js/app.js initLiveUpdates).
+ * 'sig' changes whenever a complaint in their scope is added, escalated to
+ * or away from them, updated or gets a new timeline entry, or they get a
+ * notification. Cheap: a few aggregate queries.
+ */
+function liveStateFor($userId, $role, $focusComplaintId = 0) {
+    $db = Database::getInstance()->getConnection();
+    $userId = (int)$userId;
+    // Same scope as Complaint::getComplaintsForDashboard().
+    if ($role === 'student') {
+        $scope = 'c.complainant_id = ' . $userId;
+    } elseif (in_array($role, ['oswd', 'super_admin'], true)) {
+        $scope = '1 = 1';
+    } elseif ($role === 'guidance_office') {
+        // The whole Guidance office: every complaint at the Guidance level.
+        $scope = '(c.current_level = "guidance_office" OR c.assigned_to = ' . $userId . ' OR EXISTS (SELECT 1 FROM complaint_escalations e WHERE e.complaint_id = c.complaint_id AND e.escalated_by = ' . $userId . '))';
+    } else {
+        // Held now, or escalated onward by them (they keep a view-only copy).
+        $scope = '(c.assigned_to = ' . $userId . ' OR EXISTS (SELECT 1 FROM complaint_escalations e WHERE e.complaint_id = c.complaint_id AND e.escalated_by = ' . $userId . '))';
+    }
+    $complaints = $db->query(
+        "SELECT COUNT(*) AS n, MAX(c.updated_at) AS changed, MAX(c.complaint_id) AS newest,
+                (SELECT MAX(t.timeline_id) FROM complaint_timeline t
+                   INNER JOIN complaints c ON c.complaint_id = t.complaint_id WHERE {$scope}) AS activity,
+                (SELECT MAX(m.comment_id) FROM complaint_comments m
+                   INNER JOIN complaints c ON c.complaint_id = m.complaint_id WHERE {$scope}) AS comments
+         FROM complaints c WHERE {$scope}"
+    )->fetch(PDO::FETCH_ASSOC);
+
+    // The complaint open on screen (view_complaint.php), even when it is not
+    // in the user's list, e.g. a coordinator looking at one they escalated.
+    $focus = null;
+    $focusComplaintId = (int)$focusComplaintId;
+    if ($focusComplaintId > 0) {
+        $complaintObj = new Complaint();
+        $complaint = $complaintObj->getComplaintById($focusComplaintId);
+        if ($complaint && $complaintObj->canAccessComplaint($complaint, $userId, $role)) {
+            $stmt = $db->prepare(
+                'SELECT c.status, c.assigned_to, c.updated_at,
+                        (SELECT MAX(comment_id) FROM complaint_comments WHERE complaint_id = c.complaint_id) AS comments,
+                        (SELECT MAX(timeline_id) FROM complaint_timeline WHERE complaint_id = c.complaint_id) AS activity,
+                        (SELECT MAX(CONCAT(proof_id, ":", status)) FROM complaint_resolution_proofs WHERE complaint_id = c.complaint_id) AS proof
+                 FROM complaints c WHERE c.complaint_id = :id'
+            );
+            $stmt->execute([':id' => $focusComplaintId]);
+            $focus = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+    }
+
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) AS total, SUM(is_read = 0) AS unread, MAX(notification_id) AS newest FROM notifications WHERE user_id = :id'
+    );
+    $stmt->execute([':id' => $userId]);
+    $notes = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $latest = null;
+    if ((int)$notes['unread'] > 0) {
+        $stmt = $db->prepare(
+            'SELECT notification_id, title FROM notifications WHERE user_id = :id AND is_read = 0 ORDER BY notification_id DESC LIMIT 1'
+        );
+        $stmt->execute([':id' => $userId]);
+        $latest = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    return [
+        'sig' => substr(sha1(json_encode([$complaints, $notes, $focus])), 0, 16),
+        'unread' => (int)$notes['unread'],
+        'latest_id' => $latest ? (int)$latest['notification_id'] : 0,
+        'latest_title' => $latest['title'] ?? '',
+    ];
+}
+
+/**
+ * Default order of every complaint list: Severity 1 (most serious) first,
+ * then 2, 3 ...; newest first within the same severity.
+ */
+function sortComplaintsBySeverity(array &$complaints) {
+    usort($complaints, function ($a, $b) {
+        return [(int)normalizeSeverity($a['severity'] ?? ''), $b['created_at'] ?? '']
+           <=> [(int)normalizeSeverity($b['severity'] ?? ''), $a['created_at'] ?? ''];
+    });
+}
+
+/** "View only" badge for a complaint the user escalated onward (no longer theirs to act on). */
+function viewOnlyBadgeHtml(array $complaint) {
+    if (empty($complaint['view_only'])) {
+        return '';
+    }
+    return ' <span class="badge nemsu-badge bg-secondary" title="You escalated this complaint. You can view it but not change it.">'
+        . '<i class="bi bi-eye" aria-hidden="true"></i> <span>View only</span></span>';
+}
+
+/**
+ * Does the name a student typed ("Person involved") refer to this staff
+ * member? Case, punctuation and titles (Sir, Ma'am, Prof., Dr. ...) are
+ * ignored. A full name matches when all its words are in the staff
+ * member's name (or the reverse); a single word matches their first or
+ * last name or username. Leaning towards a match is deliberate: a false
+ * match only sends the complaint one level higher.
+ */
+function personNameMatches($typed, $staffFullName, $staffUsername = '') {
+    $words = function ($name) {
+        $name = strtolower((string)$name);
+        $name = preg_replace('/[^a-z0-9\s]+/', ' ', $name);
+        $titles = ['sir', 'maam', 'ma', 'am', 'mam', 'madam', 'mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'professor',
+                   'engr', 'atty', 'mx', 'jr', 'sr', 'ii', 'iii', 'iv', 'teacher', 'instructor', 'coordinator'];
+        return array_values(array_filter(preg_split('/\s+/', trim($name)), fn($w) => $w !== '' && !in_array($w, $titles, true)));
+    };
+    $typedWords = $words(str_replace(["ma'am", 'ma’am'], ' ', strtolower((string)$typed)));
+    $staffWords = $words($staffFullName);
+    if (!$typedWords || !$staffWords) {
+        return false;
+    }
+    if (count($typedWords) === 1) {
+        $one = $typedWords[0];
+        return strlen($one) >= 3 && (in_array($one, [$staffWords[0], end($staffWords)], true)
+            || $one === strtolower((string)$staffUsername));
+    }
+    return !array_diff($typedWords, $staffWords) || !array_diff($staffWords, $typedWords);
+}
+
+/**
+ * Link to a complaint's uploaded file (evidence or resolution proof). Files
+ * are never linked from uploads/ directly: file.php checks that the signed-in
+ * user may see that complaint before sending the file.
+ */
+function complaintFileUrl($complaintId, $fileName) {
+    return 'file.php?c=' . (int)$complaintId . '&f=' . rawurlencode(basename((string)$fileName));
+}
+
+/**
+ * Server-side rate limit. Records one attempt of $action for $key (an email,
+ * an IP...) and returns true when more than $max attempts were made within
+ * $windowSeconds, in which case the caller must refuse. Keys are stored only
+ * as salted hashes. Unlike session counters, clearing cookies does not reset
+ * it. If the table is missing (migrate_rate_limits.php not run) it never blocks.
+ */
+function rateLimitExceeded($action, $key, $max, $windowSeconds) {
+    try {
+        $db = Database::getInstance()->getConnection();
+        $hash = hash('sha256', strtolower(trim((string)$key)) . '|' . LOGIN_HASH_SALT);
+        // Purge old rows now and then.
+        if (random_int(1, 50) === 1) {
+            $db->exec('DELETE FROM security_rate_limits WHERE created_at < (NOW() - INTERVAL 1 DAY)');
+        }
+        $stmt = $db->prepare(
+            'SELECT COUNT(*) FROM security_rate_limits
+             WHERE action = :a AND key_hash = :k AND created_at >= (NOW() - INTERVAL :w SECOND)'
+        );
+        $stmt->execute([':a' => $action, ':k' => $hash, ':w' => (int)$windowSeconds]);
+        if ((int)$stmt->fetchColumn() >= $max) {
+            return true;
+        }
+        $db->prepare('INSERT INTO security_rate_limits (action, key_hash) VALUES (:a, :k)')
+            ->execute([':a' => $action, ':k' => $hash]);
+        return false;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+function clientIp() {
+    return (string)($_SERVER['REMOTE_ADDR'] ?? 'cli');
+}

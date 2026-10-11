@@ -95,9 +95,56 @@
         tick();
     }
 
+    // Sign-in cooldown after a failed attempt: count down, then unlock the
+    // form so the user can try again (the next failure locks the account).
+    function initLoginCooldown() {
+        var timerEl = document.getElementById('loginCooldownTimer');
+        var form = document.getElementById('loginForm');
+        if (!timerEl || !form) {
+            return;
+        }
+        var remaining = parseInt(timerEl.getAttribute('data-seconds') || '0', 10);
+        var endsAt = Date.now() + remaining * 1000;
+
+        function unlock() {
+            form.classList.remove('login-form--locked');
+            var username = form.querySelector('#username');
+            var password = form.querySelector('#password');
+            if (username) {
+                username.readOnly = false;
+            }
+            form.querySelectorAll('[disabled]').forEach(function (el) {
+                el.disabled = false;
+            });
+            var submit = document.getElementById('loginSubmitBtn');
+            if (submit) {
+                submit.textContent = 'Sign in';
+            }
+            timerEl.classList.remove('text-muted');
+            timerEl.classList.add('text-danger');
+            timerEl.textContent = ('You can sign in again. ' + (timerEl.getAttribute('data-warning') || '')).trim();
+            if (password) {
+                password.focus();
+            }
+        }
+
+        function tick() {
+            // Based on the clock, so a background tab still unlocks on time.
+            var left = Math.ceil((endsAt - Date.now()) / 1000);
+            if (left <= 0) {
+                unlock();
+                return;
+            }
+            timerEl.textContent = 'Try again in ' + left + 's';
+            window.setTimeout(tick, 250);
+        }
+        tick();
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         initPasswordToggle();
         initOtpInputs();
         initResendTimer();
+        initLoginCooldown();
     });
 })();

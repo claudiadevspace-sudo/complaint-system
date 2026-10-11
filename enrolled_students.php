@@ -17,9 +17,9 @@ if (isset($_GET['template'])) {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="enrolled_students_template.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Student ID', 'Full Name', 'Department', 'Program']);
-    fputcsv($out, ['2023-01721', 'Juan Dela Cruz', 'DCS', 'BS Computer Science']);
-    fputcsv($out, ['2023-01722', 'Maria Santos', 'DIT', 'BS Information Technology']);
+    fputcsv($out, ['Student ID', 'Full Name', 'Department', 'Program', 'Email', 'Contact Number']);
+    fputcsv($out, ['2023-01721', 'Juan Dela Cruz', 'DCS', 'BS Computer Science', 'juan.delacruz@gmail.com', '09171234567']);
+    fputcsv($out, ['2023-01722', 'Maria Santos', 'DIT', 'BS Information Technology', 'maria.santos@gmail.com', '']);
     fclose($out);
     exit;
 }
@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // No redirect on purpose: the import summary is shown on this response.
         $importResult = $enrollment->import($file['tmp_name'], $file['name'], $mode, (int)$_SESSION['user_id']);
     } elseif (isset($_POST['add_one'])) {
-        $result = $enrollment->addOne($_POST['student_id'] ?? '', $_POST['full_name'] ?? '', $_POST['department'] ?? '', (int)$_SESSION['user_id']);
+        $result = $enrollment->addOne($_POST['student_id'] ?? '', $_POST['full_name'] ?? '', $_POST['department'] ?? '', (int)$_SESSION['user_id'], $_POST['one_program'] ?? '', $_POST['email'] ?? '', $_POST['contact_number'] ?? '');
         $_SESSION['message'] = $result['message'];
         $_SESSION['message_type'] = $result['success'] ? 'success' : 'danger';
         redirect('enrolled_students.php');
@@ -145,15 +145,16 @@ $stats = $enrollment->stats();
             <div class="row g-4 mb-4">
                 <!-- Upload a file -->
                 <div class="col-lg-7">
-                    <form method="POST" enctype="multipart/form-data" class="card nemsu-panel h-100">
+                    <form method="POST" enctype="multipart/form-data" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel h-100">
                         <?php echo csrfField(); ?>
                         <div class="card-header"><i class="bi bi-upload me-2" aria-hidden="true"></i>Upload list</div>
                         <div class="card-body">
                             <label for="list_file" class="form-label">File (.csv, .xlsx or .txt, up to 10 MB)</label>
                             <input type="file" class="form-control" id="list_file" name="list_file" accept=".csv,.xlsx,.txt" required>
                             <div class="form-text mb-3">
-                                Use a column named <strong>Student ID</strong> (optional: Full Name, Department, Program),
-                                or put one ID per line with no header. In Excel, format the ID column as <em>Text</em> so leading zeros are kept.
+                                Use a column named <strong>Student ID</strong>, plus Full Name, Department, Program, <strong>Email</strong> and Contact Number.
+                                Students register with only their ID and a password, so an entry needs a name, department, program and email before that student can register.
+                                (One ID per line with no header also works, but those students cannot register until their details are added.) In Excel, format the ID column as <em>Text</em> so leading zeros are kept.
                             </div>
                             <div class="form-check">
                                 <input class="form-check-input" type="radio" name="mode" id="mode_add" value="add" checked>
@@ -177,7 +178,7 @@ $stats = $enrollment->stats();
 
                 <!-- Add one ID by hand -->
                 <div class="col-lg-5">
-                    <form method="POST" class="card nemsu-panel h-100">
+                    <form method="POST" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel h-100">
                         <?php echo csrfField(); ?>
                         <div class="card-header"><i class="bi bi-person-plus me-2" aria-hidden="true"></i>Add one student</div>
                         <div class="card-body row g-2">
@@ -196,6 +197,31 @@ $stats = $enrollment->stats();
                                     <?php foreach (departments() as $dept): ?><option value="<?php echo $dept; ?>"><?php echo $dept; ?></option><?php endforeach; ?>
                                 </select>
                             </div>
+                            <div class="col-12">
+                                <label for="one_program" class="form-label small">Program</label>
+                                <?php
+                                // Official programs, filtered by the chosen department (app.js).
+                                $programSelectId = 'one_program';
+                                $programSelectValue = '';
+                                $programSelectDept = '';
+                                $programSelectOnly = '';
+                                $programSelectFilterBy = 'one_dept';
+                                $programSelectRequired = false;
+                                $programSelectEmpty = '—';
+                                include 'includes/program_select.php';
+                                ?>
+                            </div>
+                            <div class="col-md-7">
+                                <label for="one_email" class="form-label small">Email</label>
+                                <input type="email" class="form-control form-control-sm" id="one_email" name="email" maxlength="100" placeholder="student@gmail.com">
+                            </div>
+                            <div class="col-md-5">
+                                <label for="one_contact" class="form-label small">Contact number</label>
+                                <input type="tel" class="form-control form-control-sm" id="one_contact" name="contact_number" maxlength="20">
+                            </div>
+                            <div class="col-12">
+                                <div class="form-text">The student registers with only their ID and a password, so fill in the name, department, program and email.</div>
+                            </div>
                         </div>
                         <div class="card-footer bg-white d-flex justify-content-end">
                             <button type="submit" name="add_one" value="1" class="btn btn-outline-primary">Add</button>
@@ -205,11 +231,11 @@ $stats = $enrollment->stats();
             </div>
 
             <!-- Filters -->
-            <form method="GET" class="card nemsu-panel mb-3">
+            <form method="GET" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-3">
                 <div class="card-body row g-2 align-items-end">
                     <div class="col-12 col-md-4">
                         <label for="q" class="form-label small">Search</label>
-                        <input type="search" class="form-control form-control-sm" id="q" name="q" placeholder="Student ID or name" value="<?php echo htmlspecialchars($filters['q']); ?>">
+                        <input type="search" class="form-control form-control-sm" id="q" name="q" placeholder="Student ID, name or email" value="<?php echo htmlspecialchars($filters['q']); ?>">
                     </div>
                     <div class="col-6 col-md-3">
                         <label for="fdept" class="form-label small">Department</label>
@@ -236,7 +262,7 @@ $stats = $enrollment->stats();
             </form>
 
             <!-- The list -->
-            <div class="card nemsu-panel">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                 <div class="card-header"><i class="bi bi-list-ul me-2" aria-hidden="true"></i>Enrolled students (<?php echo $list['total']; ?>)</div>
                 <div class="card-body p-0">
                     <?php if (!$list['rows']): ?>
@@ -247,7 +273,7 @@ $stats = $enrollment->stats();
                         <div class="table-responsive nemsu-table-wrap">
                             <table class="table table-hover align-middle mb-0 nemsu-table nemsu-table--stack">
                                 <thead>
-                                    <tr><th>Student ID</th><th>Name</th><th>Department</th><th>Program</th><th>Account</th><th class="text-end nemsu-stack-full"></th></tr>
+                                    <tr><th>Student ID</th><th>Name</th><th>Department</th><th>Program</th><th>Email</th><th>Account</th><th class="text-end nemsu-stack-full"></th></tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($list['rows'] as $row): ?>
@@ -256,6 +282,11 @@ $stats = $enrollment->stats();
                                             <td><?php echo htmlspecialchars($row['full_name'] ?: '—'); ?></td>
                                             <td><?php echo htmlspecialchars($row['department'] ?: '—'); ?></td>
                                             <td><small><?php echo htmlspecialchars($row['program'] ?: '—'); ?></small></td>
+                                            <td><small><?php echo htmlspecialchars($row['email'] ?: '—'); ?></small>
+                                                <?php if (!$row['registered_username'] && ($missing = $enrollment->missingForRegistration($row))): ?>
+                                                    <div class="small text-warning-emphasis" title="This student cannot register until these are added"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Missing <?php echo htmlspecialchars(implode(', ', $missing)); ?></div>
+                                                <?php endif; ?>
+                                            </td>
                                             <td>
                                                 <?php if ($row['registered_username']): ?>
                                                     <span class="badge bg-success">Registered</span>

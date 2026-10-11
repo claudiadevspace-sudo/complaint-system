@@ -1,4 +1,9 @@
 <?php
+// Command line only (php migrate_user_presence.php): never run from a browser.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 /**
  * Migration: sign-in activity ("Active" / "Inactive" in User management).
  *

@@ -31,7 +31,7 @@ include 'includes/super_admin_top.php';
 
 <div class="row g-4">
     <div class="col-lg-7">
-        <div class="card nemsu-panel mb-4">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
             <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
                 <span>Details</span>
                 <span class="d-flex gap-2"><?php echo statusBadgeHtml($c['status']); ?><?php echo severityBadgeHtml($c['severity']); ?></span>
@@ -43,7 +43,9 @@ include 'includes/super_admin_top.php';
                     <dt class="col-sm-4">Category</dt><dd class="col-sm-8"><?php echo htmlspecialchars($c['complaint_category'] ?? '—'); ?></dd>
                     <dt class="col-sm-4">Type</dt><dd class="col-sm-8"><?php echo ($c['complaint_type'] ?? '') === 'services' ? 'Service-related (direct to OSWD)' : 'Person-related (escalation chain)'; ?></dd>
                     <dt class="col-sm-4">Current level</dt><dd class="col-sm-8"><?php echo htmlspecialchars(workflowLevelLabel($c['current_level'])); ?><?php if (!empty($c['assigned_name'])): ?> — <?php echo htmlspecialchars($c['assigned_name']); ?><?php endif; ?></dd>
-                    <dt class="col-sm-4">Respondent</dt><dd class="col-sm-8"><?php echo htmlspecialchars($c['respondent_name'] ?? 'N/A'); ?><?php if ($c['respondent_type']): ?> (<?php echo htmlspecialchars(formatStatus($c['respondent_type'])); ?>)<?php endif; ?></dd>
+                    <?php if (!empty($c['respondent_name'])): ?><!-- "Name of person involved" from the form -->
+                    <dt class="col-sm-4">Person involved</dt><dd class="col-sm-8"><?php echo htmlspecialchars($c['respondent_name']); ?><?php if (!empty($c['respondent_details'])): ?> <span class="text-muted">— <?php echo htmlspecialchars($c['respondent_details']); ?></span><?php elseif ($c['respondent_type']): ?> (<?php echo htmlspecialchars(formatStatus($c['respondent_type'])); ?>)<?php endif; ?></dd>
+                    <?php endif; ?>
                     <dt class="col-sm-4">Incident</dt><dd class="col-sm-8"><?php echo date('M j, Y', strtotime($c['incident_date'])); ?> · <?php echo htmlspecialchars($c['incident_location'] ?? 'No location given'); ?></dd>
                     <dt class="col-sm-4">Submitted</dt><dd class="col-sm-8"><?php echo date('M j, Y g:i A', strtotime($c['created_at'])); ?></dd>
                     <dt class="col-sm-4">Description</dt><dd class="col-sm-8"><?php echo nl2br(htmlspecialchars($c['complaint_description'])); ?></dd>
@@ -52,7 +54,7 @@ include 'includes/super_admin_top.php';
         </div>
 
         <!-- Escalations: who forwarded it, to whom, and why -->
-        <div class="card nemsu-panel mb-4">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
             <div class="card-header"><i class="bi bi-arrow-up-right-circle me-2" aria-hidden="true"></i>Escalations (<?php echo count($detail['escalations']); ?>)</div>
             <div class="card-body p-0">
                 <?php if (!$detail['escalations']): ?>
@@ -78,12 +80,37 @@ include 'includes/super_admin_top.php';
             </div>
         </div>
 
-        <!-- Comments (read only) -->
-        <div class="card nemsu-panel mb-4">
-            <div class="card-header"><i class="bi bi-chat-left-text me-2" aria-hidden="true"></i>Comments (<?php echo count($detail['comments']); ?>)</div>
+        <!-- Resolution proof history (read only) -->
+        <?php $proofs = (new ResolutionProof())->forComplaint($c['complaint_id']); ?>
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
+            <div class="card-header"><i class="bi bi-patch-check me-2" aria-hidden="true"></i>Resolution proof (<?php echo count($proofs); ?>)</div>
+            <div class="card-body">
+                <?php if (!$proofs): ?>
+                    <p class="text-muted small mb-0">No proof uploaded yet. The complaint cannot be resolved until the student approves uploaded proof.</p>
+                <?php endif; ?>
+                <?php foreach ($proofs as $proof): ?>
+                    <?php [$pClass, $pLabel] = ResolutionProof::statusMeta($proof['status']); ?>
+                    <div class="border-bottom pb-2 mb-2">
+                        <div class="d-flex justify-content-between flex-wrap gap-2">
+                            <span class="badge bg-<?php echo $pClass; ?>"><?php echo $pLabel; ?></span>
+                            <small class="text-muted"><?php echo date('M j, Y g:i A', strtotime($proof['created_at'])); ?> · <?php echo htmlspecialchars($proof['uploaded_by_name']); ?></small>
+                        </div>
+                        <div class="small mt-1"><?php echo nl2br(htmlspecialchars($proof['note'])); ?></div>
+                        <?php if ($proof['student_response']): ?>
+                            <div class="small text-muted">Student: <?php echo htmlspecialchars($proof['student_response']); ?></div>
+                        <?php endif; ?>
+                        <a href="<?php echo htmlspecialchars(complaintFileUrl($c['complaint_id'], $proof['file_name'])); ?>" target="_blank" rel="noopener" class="small">View file</a>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <!-- Chat (read only) -->
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
+            <div class="card-header"><i class="bi bi-chat-left-text me-2" aria-hidden="true"></i>Chat (<?php echo count($detail['comments']); ?>)</div>
             <div class="card-body">
                 <?php if (!$detail['comments']): ?>
-                    <p class="text-muted small mb-0">No comments.</p>
+                    <p class="text-muted small mb-0">No chat messages.</p>
                 <?php endif; ?>
                 <?php foreach ($detail['comments'] as $comment): ?>
                     <div class="border-bottom pb-2 mb-2">
@@ -100,10 +127,10 @@ include 'includes/super_admin_top.php';
 
     <!-- Full routing history (every timeline event, unfiltered) -->
     <div class="col-lg-5">
-        <div class="card nemsu-panel">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
             <div class="card-header"><i class="bi bi-clock-history me-2" aria-hidden="true"></i>Routing history</div>
             <ul class="list-group list-group-flush">
-                <?php foreach ($detail['timeline'] as $event): ?>
+                <?php foreach (array_reverse($detail['timeline']) as $event): /* latest first */ ?>
                     <li class="list-group-item">
                         <div class="d-flex justify-content-between flex-wrap gap-2">
                             <span class="badge bg-secondary"><?php echo htmlspecialchars(formatStatus($event['action_type'])); ?></span>

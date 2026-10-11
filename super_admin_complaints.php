@@ -23,7 +23,7 @@ $pageSubtitle = 'All complaints and where they are in the routing. View only.';
 include 'includes/super_admin_top.php';
 ?>
 
-<form method="GET" class="card nemsu-panel mb-3">
+<form method="GET" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-3">
     <div class="card-body row g-2 align-items-end">
         <div class="col-12 col-md-2">
             <label for="q" class="form-label small">Search</label>
@@ -72,7 +72,7 @@ include 'includes/super_admin_top.php';
     </div>
 </form>
 
-<div class="card nemsu-panel">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
     <div class="card-header"><i class="bi bi-folder2-open me-2" aria-hidden="true"></i>Complaints (<?php echo count($complaints); ?>)</div>
     <div class="card-body p-0">
         <?php if (!$complaints): ?>

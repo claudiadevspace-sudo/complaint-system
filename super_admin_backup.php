@@ -113,7 +113,7 @@ include 'includes/super_admin_top.php';
 
 <?php if ($restoreTarget): ?>
     <!-- ===== Restore confirmation ===== -->
-    <form method="POST" action="super_admin_backup.php" class="card nemsu-panel mb-4 border-danger">
+    <form method="POST" action="super_admin_backup.php" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4 border-danger">
         <?php echo csrfField(); ?>
         <input type="hidden" name="name" value="<?php echo htmlspecialchars(basename($restoreTarget)); ?>">
         <div class="card-header"><i class="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>Restore <?php echo htmlspecialchars(basename($restoreTarget)); ?></div>
@@ -140,7 +140,7 @@ include 'includes/super_admin_top.php';
 <div class="row g-4">
     <!-- Backups list -->
     <div class="col-xl-8">
-        <div class="card nemsu-panel">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
             <div class="card-header"><i class="bi bi-database me-2" aria-hidden="true"></i>Backups (<?php echo count($backups); ?>)</div>
             <div class="card-body p-0">
                 <?php if (!$backups): ?>
@@ -195,7 +195,7 @@ include 'includes/super_admin_top.php';
 
     <div class="col-xl-4">
         <!-- Automatic backup schedule -->
-        <div class="card nemsu-panel">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
             <div class="card-header"><i class="bi bi-clock-history me-2" aria-hidden="true"></i>Automatic backups</div>
             <div class="card-body small">
                 <?php if ($autoEnabled): ?>
@@ -213,7 +213,7 @@ include 'includes/super_admin_top.php';
         </div>
 
         <!-- Upload a backup file -->
-        <form method="POST" enctype="multipart/form-data" class="card nemsu-panel">
+        <form method="POST" enctype="multipart/form-data" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
             <?php echo csrfField(); ?>
             <div class="card-header"><i class="bi bi-upload me-2" aria-hidden="true"></i>Upload a backup</div>
             <div class="card-body">
@@ -225,7 +225,7 @@ include 'includes/super_admin_top.php';
             </div>
         </form>
 
-        <div class="card nemsu-panel">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
             <div class="card-header"><i class="bi bi-info-circle me-2" aria-hidden="true"></i>Good practice</div>
             <div class="card-body small">
                 <ul class="mb-0">

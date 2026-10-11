@@ -63,7 +63,7 @@ $pageActions = '<a class="btn btn-outline-danger btn-sm" href="super_admin_repor
 include 'includes/super_admin_top.php';
 ?>
 
-<form method="GET" class="card nemsu-panel mb-4">
+<form method="GET" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
     <div class="card-body row g-2 align-items-end">
         <div class="col-6 col-md-2">
             <label for="from" class="form-label small">From</label>
@@ -122,7 +122,7 @@ include 'includes/super_admin_top.php';
     foreach (ReportExporter::GROUPS as $title => $key):   // same groups as the exported files
     ?>
         <div class="col-md-6 col-xl-4">
-            <div class="card nemsu-panel h-100">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel h-100">
                 <div class="card-header"><?php echo $title; ?></div>
                 <ul class="list-group list-group-flush">
                     <?php if (!$report['summary'][$key]): ?>

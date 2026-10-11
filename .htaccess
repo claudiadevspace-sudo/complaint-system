@@ -1,0 +1,18 @@
+# ------------------------------------------------------------------
+# OSWD Complaint System: what the browser may NOT open.
+# (Apache 2.4. Each private folder also has its own .htaccess.)
+# ------------------------------------------------------------------
+
+# No folder listings anywhere.
+Options -Indexes
+
+# Hidden files, database dumps, notes, logs, data and model files.
+<FilesMatch "(^\.|\.(sql|md|txt|log|ini|bak|lock|csv|py|pyc|pkl|joblib|sav)$)">
+    Require all denied
+</FilesMatch>
+
+# Maintenance scripts are run from the command line only
+# (php migrate_xxx.php, php backup_cron.php, ...), never from the web.
+<FilesMatch "^(migrate_[A-Za-z0-9_]*|_[A-Za-z0-9_]*|create_super_admin|setup_system|backup_cron)\.php$">
+    Require all denied
+</FilesMatch>

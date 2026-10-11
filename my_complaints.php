@@ -8,6 +8,7 @@ if ($_SESSION['role'] !== 'student') {
 
 $complaint = new Complaint();
 $complaints = $complaint->getComplaintsByUser($_SESSION['user_id']);
+sortComplaintsBySeverity($complaints);   // Severity 1 first
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -31,7 +32,7 @@ $complaints = $complaint->getComplaintsByUser($_SESSION['user_id']);
                 <a href="submit_complaint.php" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>File a complaint</a>
             </div>
 
-            <div class="card nemsu-panel">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                 <div class="card-body p-0">
                     <?php if (empty($complaints)): ?>
                         <?php echo renderEmptyState('journal-x', 'No complaints yet', 'When you file a complaint, it will appear here with status updates.', 'File a complaint', 'submit_complaint.php'); ?>

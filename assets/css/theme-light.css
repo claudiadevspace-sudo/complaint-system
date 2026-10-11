@@ -1,0 +1,209 @@
+/*
+ * Light mode — the colours of the NEMSU logo, for the signed-in dashboards.
+ *
+ * Loaded by includes/head.php ONLY when a signed-in user is in Light mode.
+ * Dark mode (theme-dark.css) and the sign-in pages are not affected.
+ *
+ * Palette (sampled from assets/images/nemsu-logo.png):
+ *   royal blue #1f10d9 (logo ring and shield) → lighter #4a3df0 for bars and
+ *   buttons, with white text; darker #1608a8 for hover; the same royal blue
+ *   for titles and links on white; logo gold #f2b514 for accent lines.
+ */
+
+body.app-body {
+    /* Text that used navy now uses the logo royal blue. */
+    --nemsu-blue-900: #1f10d9;
+    --nemsu-blue-800: #1608a8;
+    --nemsu-blue-700: #1a0dbd;
+    --nemsu-blue-600: #1f10d9;
+    --nemsu-blue-100: #ecebfd;
+    --nemsu-blue-50: #f5f4ff;
+    --nemsu-border: rgba(31, 16, 217, 0.18);
+    --nemsu-link: #1f10d9;
+    --nemsu-link-hover: #1608a8;
+    --nemsu-shadow: 0 10px 30px rgba(31, 16, 217, 0.10);
+    --nemsu-shadow-hover: 0 16px 40px rgba(31, 16, 217, 0.18);
+
+    /* Bootstrap's "primary" (badges, links, progress bars, pagination...) */
+    --bs-primary: #1a0dbd;
+    --bs-primary-rgb: 31, 16, 217;
+    --bs-link-color: #1f10d9;
+    --bs-link-color-rgb: 31, 16, 217;
+    --bs-link-hover-color: #1608a8;
+}
+
+/* ---- Navbar ---- */
+body.app-body .navbar.nemsu-navbar {
+    background: linear-gradient(90deg, #1f10d9, #4a3df0) !important;
+    box-shadow: 0 4px 20px rgba(31, 16, 217, 0.25);
+}
+
+/* ---- Sidebar (dark navy in Dark mode, logo royal blue here) ---- */
+body.app-body .nemsu-sidebar,
+body.app-body .sidebar.nemsu-sidebar,
+body.app-body .offcanvas-md.nemsu-sidebar,
+body.app-body .offcanvas.nemsu-sidebar {
+    background: linear-gradient(180deg, #4a3df0 0%, #1f10d9 100%) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+}
+
+body.app-body .nemsu-sidebar .sidebar-label {
+    color: rgba(255, 255, 255, 0.85);
+    opacity: 1;
+}
+
+body.app-body .nemsu-sidebar__section-label {
+    border-top-color: rgba(255, 255, 255, 0.3);
+}
+
+body.app-body .nemsu-sidebar .nav-link,
+body.app-body .nemsu-sidebar .nav-link i {
+    color: #ffffff;
+}
+
+body.app-body .nemsu-sidebar .nav-link:hover,
+body.app-body .nemsu-sidebar .nav-link:focus-visible {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+}
+
+body.app-body .nemsu-sidebar .nav-link:hover i,
+body.app-body .nemsu-sidebar .nav-link:focus-visible i {
+    color: #ffffff;
+}
+
+body.app-body .nemsu-sidebar .nav-link.active {
+    background: rgba(255, 255, 255, 0.24);
+    color: #ffffff;
+    box-shadow: inset 3px 0 0 var(--nemsu-gold-500), 0 4px 12px rgba(22, 8, 168, 0.18);
+}
+
+body.app-body .nemsu-sidebar .nav-link.active i {
+    color: #ffffff;
+}
+
+/* ---- Card header bars ---- */
+body.app-body .card-header:not(.bg-warning-subtle),
+body.app-body .nemsu-panel .card-header:not(.bg-warning-subtle) {
+    background: linear-gradient(90deg, #1f10d9, #4a3df0);
+    color: #ffffff;
+}
+
+/* Icons in the bars were gold on navy; white reads better on blue. */
+body.app-body .card-header:not(.bg-warning-subtle) > i,
+body.app-body .card-header:not(.bg-warning-subtle) > span > i,
+body.app-body .card-header:not(.bg-warning-subtle) :is(h1, h2, h3, h4, h5, h6) > i {
+    color: #ffffff;
+}
+
+body.app-body .card-header:not(.bg-warning-subtle) .text-muted,
+body.app-body .card-header:not(.bg-warning-subtle) small {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+body.app-body .card-header:not(.bg-warning-subtle) .btn-outline-primary:hover,
+body.app-body .card-header:not(.bg-warning-subtle) .btn-outline-secondary:hover {
+    color: #1f10d9;
+}
+
+/* ---- Buttons ---- */
+body.app-body .btn-primary {
+    --bs-btn-bg: #1f10d9;
+    --bs-btn-border-color: #1a0dbd;
+    --bs-btn-hover-bg: #1a0dbd;
+    --bs-btn-hover-border-color: #1a0dbd;
+    --bs-btn-active-bg: #1608a8;
+    --bs-btn-active-border-color: #1608a8;
+    --bs-btn-disabled-bg: #8a82f5;
+    --bs-btn-disabled-border-color: #8a82f5;
+    background: linear-gradient(180deg, #4a3df0, #1a0dbd);
+    border: 1px solid #1a0dbd;
+    box-shadow: 0 4px 12px rgba(31, 16, 217, 0.30);
+    color: #ffffff;
+}
+
+body.app-body .btn-primary:hover,
+body.app-body .btn-primary:focus {
+    background: linear-gradient(180deg, #4a3df0, #1f10d9);
+    border-color: var(--nemsu-gold-500);
+    box-shadow: 0 6px 18px rgba(31, 16, 217, 0.38);
+    color: #ffffff;
+}
+
+/* Gold buttons inside a header bar stay gold. */
+body.app-body .card-header:not(.bg-warning-subtle) .btn-primary {
+    background: var(--nemsu-gold-500);
+    border-color: var(--nemsu-gold-500);
+    color: #1a2b42;
+    box-shadow: none;
+}
+
+body.app-body .btn-outline-primary {
+    --bs-btn-color: #1f10d9;
+    --bs-btn-border-color: #1f10d9;
+    --bs-btn-hover-bg: #1f10d9;
+    --bs-btn-hover-border-color: #1f10d9;
+    --bs-btn-hover-color: #ffffff;
+    --bs-btn-active-bg: #1a0dbd;
+    --bs-btn-active-border-color: #1a0dbd;
+    --bs-btn-active-color: #ffffff;
+}
+
+/* ---- Stat tiles (Total / In progress ...) ---- */
+body.app-body .nemsu-stat-card--blue {
+    background: linear-gradient(135deg, #1a0dbd, #4a3df0);
+}
+
+body.app-body .nemsu-stat-card--sky {
+    background: linear-gradient(135deg, #1a0dbd, #8a82f5);
+}
+
+/* ---- Small pieces that used navy ---- */
+body.app-body .pagination {
+    --bs-pagination-color: #1f10d9;
+    --bs-pagination-hover-color: #1608a8;
+    --bs-pagination-active-bg: #1f10d9;
+    --bs-pagination-active-border-color: #1f10d9;
+}
+
+body.app-body .nav-tabs {
+    --bs-nav-tabs-link-active-color: #1f10d9;
+}
+
+body.app-body .progress {
+    --bs-progress-bar-bg: #1f10d9;
+}
+
+body.app-body .form-check-input:checked {
+    background-color: #1f10d9;
+    border-color: #1f10d9;
+}
+
+/* ---- Dashboard stat cards: same royal blue as the sidebar ---- */
+body.app-body .nemsu-stat-grid .nemsu-stat-card--nav {
+    background: linear-gradient(180deg, #4a3df0 0%, #1f10d9 100%);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+body.app-body .nemsu-stat-card--link:hover,
+body.app-body .nemsu-stat-card--link:focus-visible {
+    box-shadow: 0 12px 26px rgba(31, 16, 217, 0.32);
+}
+
+/* ---- Logo gold accents ---- */
+body.app-body .navbar.nemsu-navbar {
+    border-bottom: 3px solid #f2b514;
+}
+
+body.app-body .card-header:not(.bg-warning-subtle) {
+    border-bottom: 2px solid #f2b514;
+}
+
+body.app-body .nemsu-sidebar .nav-link.active {
+    box-shadow: inset 3px 0 0 #f2b514, 0 4px 12px rgba(22, 8, 168, 0.22);
+}
+
+body.app-body .nemsu-stat-grid .nemsu-stat-card--nav {
+    border-top: 3px solid #f2b514;
+}

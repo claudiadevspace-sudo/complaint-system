@@ -48,7 +48,7 @@ include 'includes/super_admin_top.php';
     <div class="col-lg-6">
         <?php if ($identity): ?>
             <!-- ===== Result: shown once ===== -->
-            <div class="card nemsu-panel border-warning">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel border-warning">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-person-badge me-2" aria-hidden="true"></i><?php echo htmlspecialchars($identity['alias']); ?></span>
                     <span class="badge bg-warning text-dark">Logged</span>
@@ -76,7 +76,7 @@ include 'includes/super_admin_top.php';
             <?php if ($error): ?>
                 <div class="alert alert-danger" role="alert"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
-            <form method="POST" action="super_admin_reveal.php" class="card nemsu-panel">
+            <form method="POST" action="super_admin_reveal.php" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                 <?php echo csrfField(); ?>
                 <input type="hidden" name="complaint_id" value="<?php echo $complaintId ?: ''; ?>">
                 <div class="card-body">
@@ -116,12 +116,12 @@ include 'includes/super_admin_top.php';
     </div>
 
     <div class="col-lg-6">
-        <div class="card nemsu-panel">
+        <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
             <div class="card-header"><i class="bi bi-info-circle me-2" aria-hidden="true"></i>How anonymity works</div>
             <div class="card-body small">
                 <ul class="mb-0">
                     <li>Every student gets a random alias when their account is created.</li>
-                    <li>Coordinators, chairpersons, guidance and OSWD see only the alias on complaints, comments and history.</li>
+                    <li>Coordinators, chairpersons, guidance and OSWD see only the alias on complaints, chat and history.</li>
                     <li>Only the Super Admin can reveal an identity, and only with a written reason.</li>
                     <li>Each reveal records who, when, which alias, the reason and the related complaint in the
                         <a href="super_admin_audit.php?action=identity_reveal">audit log</a>, which cannot be edited or deleted.</li>

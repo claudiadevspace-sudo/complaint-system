@@ -2,10 +2,8 @@
 require_once 'config/config.php';
 requireLogin();
 
-if (($_SESSION['role'] ?? '') !== 'student') {
-    redirect('dashboard.php');
-}
-
+// Every signed-in user has notifications (students, staff, OSWD, Super Admin).
+$role = $_SESSION['role'] ?? '';
 $notificationService = new Notification();
 $userId = (int)$_SESSION['user_id'];
 
@@ -19,7 +17,8 @@ if (isset($_POST['mark_all_read']) && verifyCsrf()) {
 if (isset($_GET['read']) && ctype_digit((string)$_GET['read'])) {
     $notificationService->markRead((int)$_GET['read'], $userId);
     if (!empty($_GET['complaint'])) {
-        redirect('view_complaint.php?id=' . (int)$_GET['complaint']);
+        // The Super Admin views complaints on their own read-only page.
+        redirect(($role === 'super_admin' ? 'super_admin_complaint.php' : 'view_complaint.php') . '?id=' . (int)$_GET['complaint']);
     }
     redirect('notifications.php');
 }
@@ -54,10 +53,19 @@ $unreadCount = $notificationService->getUnreadCount($userId);
                 <?php endif; ?>
             </div>
 
-            <div class="card nemsu-panel">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                 <div class="card-body p-0">
                     <?php if (empty($notifications)): ?>
-                        <?php echo renderEmptyState('bell', 'No notifications yet', 'Updates about your complaints will appear here.', 'View my complaints', 'my_complaints.php'); ?>
+                        <?php
+                        // Where the "nothing yet" button leads, per role.
+                        [$emptyText, $emptyLabel, $emptyLink] = match ($role) {
+                            'student' => ['Updates about your complaints will appear here.', 'View my complaints', 'my_complaints.php'],
+                            'super_admin' => ['System notices will appear here.', 'Go to overview', 'super_admin.php'],
+                            'oswd' => ['Updates on complaints and account lockout requests will appear here.', 'Go to dashboard', 'dashboard.php'],
+                            default => ['Updates on complaints assigned to you (for example, a student approving or rejecting resolution proof) will appear here.', 'Assigned to me', 'assigned_complaints.php'],
+                        };
+                        echo renderEmptyState('bell', 'No notifications yet', $emptyText, $emptyLabel, $emptyLink);
+                        ?>
                     <?php else: ?>
                         <ul class="list-group list-group-flush nemsu-notification-list">
                             <?php foreach ($notifications as $item): ?>

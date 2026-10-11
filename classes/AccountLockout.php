@@ -108,7 +108,8 @@ class AccountLockout {
             'fails' => $fails,
             'retry_after' => $retryAfter,
             'show_student_service' => $type === 'blocked',
-            'message' => $this->failureMessage($type, $retryAfter),
+            'attempts_left' => max(0, LOGIN_BLOCK_AFTER_FAILS - $fails),
+            'message' => $this->failureMessage($type, $retryAfter, max(0, LOGIN_BLOCK_AFTER_FAILS - $fails)),
             'user' => $user,
         ];
     }
@@ -638,6 +639,7 @@ class AccountLockout {
     }
 
     private function gateResult($type, $retryAfter, $user, $row) {
+        $attemptsLeft = max(0, LOGIN_BLOCK_AFTER_FAILS - (int)($row['consecutive_fails'] ?? 0));
         return [
             'allowed' => false,
             'type' => $type,
@@ -646,16 +648,18 @@ class AccountLockout {
             'row' => $row,
             'key' => $row['username_key'] ?? '',
             'show_student_service' => $type === 'blocked',
-            'message' => $this->failureMessage($type, max(1, (int)$retryAfter)),
+            'attempts_left' => $attemptsLeft,
+            'message' => $this->failureMessage($type, max(1, (int)$retryAfter), $attemptsLeft),
         ];
     }
 
-    private function failureMessage($type, $retryAfter) {
+    private function failureMessage($type, $retryAfter, $attemptsLeft = null) {
         if ($type === 'blocked') {
             return 'This account is locked for 1 day after too many failed sign-in attempts. Please contact Student Services so OSWD can review and help you reset your credentials.';
         }
         if ($type === 'cooldown') {
-            return 'Too many failed attempts. Please wait ' . (int)$retryAfter . ' seconds before trying again.';
+            return 'Too many failed attempts. Please wait ' . (int)$retryAfter . ' seconds before trying again.'
+                . lockWarning($attemptsLeft);
         }
         return 'Invalid credentials!';
     }

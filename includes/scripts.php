@@ -1,7 +1,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
 <script src="assets/js/toast.js" defer></script>
-<script src="assets/js/theme.js" defer></script>
-<script src="assets/js/auth.js" defer></script>
+<script src="assets/js/theme.js?v=<?php echo (int)@filemtime(__DIR__ . '/../assets/js/theme.js'); ?>" defer></script>
+<script src="assets/js/auth.js?v=<?php echo (int)@filemtime(__DIR__ . '/../assets/js/auth.js'); ?>" defer></script>
 <script src="assets/js/app.js?v=<?php echo (int)@filemtime(__DIR__ . '/../assets/js/app.js'); ?>" defer></script>
 <?php
 if (!empty($pageScripts) && is_array($pageScripts)) {

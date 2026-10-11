@@ -74,7 +74,7 @@ function lockoutStatusBadge($value) {
                 <?php endforeach; ?>
             </div>
 
-            <div class="card nemsu-panel">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                 <div class="card-header"><i class="bi bi-shield-exclamation me-2" aria-hidden="true"></i>Lockout requests</div>
                 <div class="card-body p-0">
                     <?php if (empty($reviews)): ?>

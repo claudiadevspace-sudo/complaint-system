@@ -21,11 +21,25 @@ if (isset($_POST['submit_complaint'])) {
         $title = sanitizeInput($_POST['complaint_title'] ?? '');
         $description = sanitizeInput($_POST['complaint_description'] ?? '');
         $category = sanitizeInput($_POST['complaint_category'] ?? '');
-        $respondentName = sanitizeInput($_POST['respondent_name'] ?? '');
-        $respondentType = sanitizeInput($_POST['respondent_type'] ?? '');
+        // Person involved (optional): a name plus a short description of who
+        // they are. Not asked for Campus Facilities. If the name is the Program
+        // Coordinator's, the complaint goes to the Department Chair instead
+        // (see Complaint::submitComplaint).
+        $respondentName = mb_substr(sanitizeInput($_POST['person_name'] ?? ''), 0, 200);
+        $respondentDetails = mb_substr(sanitizeInput($_POST['person_details'] ?? ''), 0, 255);
+        if ($category === 'Campus Facilities') {
+            $respondentName = $respondentDetails = '';
+        }
+        if ($respondentName !== '' && $respondentDetails === '') {
+            $errors[] = 'Add a short description of the person involved (for example their role or how they are involved).';
+        }
+        if ($respondentName === '') {
+            $respondentDetails = '';
+        }
+        // The person is not necessarily a student; with no name, keep "student" as before.
+        $respondentType = $respondentName !== '' ? null : 'student';
         $incidentDate = $_POST['incident_date'] ?? '';
         $incidentLocation = sanitizeInput($_POST['incident_location'] ?? '');
-        $severity = $_POST['severity'] ?? 'medium';
 
         if ($title === '' || $description === '') {
             $errors[] = 'Title and description are required.';
@@ -33,12 +47,8 @@ if (isset($_POST['submit_complaint'])) {
         if (!in_array($category, allowedComplaintCategories(), true)) {
             $errors[] = 'Please select a valid complaint category.';
         }
-        if ($respondentType !== '' && !in_array($respondentType, allowedRespondentTypes(), true)) {
-            $errors[] = 'Please select a valid respondent type.';
-        }
-        if (!in_array($severity, allowedSeverities(), true)) {
-            $severity = 'medium';
-        }
+        // Severity is not chosen by the student: it follows the nature of the complaint.
+        $severity = severityForCategory($category);
         if ($incidentDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $incidentDate)) {
             $errors[] = 'Please provide a valid incident date.';
         } elseif (strtotime($incidentDate) > strtotime(date('Y-m-d'))) {
@@ -92,6 +102,7 @@ if (isset($_POST['submit_complaint'])) {
                 'complainant_id' => $_SESSION['user_id'],
                 'respondent_name' => $respondentName,
                 'respondent_type' => $respondentType,
+                'respondent_details' => $respondentDetails,
                 'complaint_title' => $title,
                 'complaint_description' => $description,
                 'complaint_category' => $category,
@@ -116,7 +127,7 @@ if (isset($_POST['submit_complaint'])) {
     }
 }
 
-$pageScripts = ['assets/js/wizard.js'];
+$pageScripts = ['assets/js/wizard.js?v=' . (int)@filemtime(__DIR__ . '/assets/js/wizard.js')];   // version: browsers fetch the new copy
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -138,7 +149,7 @@ $pageScripts = ['assets/js/wizard.js'];
             </div>
 
             <?php if ($successId > 0): ?>
-                <div class="card nemsu-success-card text-center py-5 px-4">
+                <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-success-card text-center py-5 px-4">
                     <div class="nemsu-success-card__icon" aria-hidden="true"><i class="bi bi-check-circle-fill"></i></div>
                     <h2 class="h4">Complaint submitted</h2>
                     <p class="text-muted mb-3">Your reference number is</p>
@@ -159,7 +170,7 @@ $pageScripts = ['assets/js/wizard.js'];
 
                     <div id="wizardErrors" class="alert alert-danger py-2" role="alert" hidden aria-live="assertive"></div>
 
-                    <form method="POST" action="submit_complaint.php" enctype="multipart/form-data" id="submitComplaintForm">
+                    <form method="POST" action="submit_complaint.php" enctype="multipart/form-data" id="submitComplaintForm" class="card nemsu-wizard-card p-3 p-md-4" data-bs-theme="<?php echo appTheme(); ?>">
                         <?php echo csrfField(); ?>
                         <input type="hidden" name="complaint_category" id="complaint_category" value="">
 
@@ -171,11 +182,13 @@ $pageScripts = ['assets/js/wizard.js'];
                                     <div class="col-md-6">
                                         <div class="nemsu-category-card" tabindex="0" role="button"
                                              data-category="<?php echo htmlspecialchars($card['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                             data-severity-label="<?php echo htmlspecialchars(severityMeta(severityForCategory($card['name']))['long'], ENT_QUOTES, 'UTF-8'); ?>"
                                              aria-pressed="false">
                                             <i class="bi <?php echo htmlspecialchars($card['icon'], ENT_QUOTES, 'UTF-8'); ?> nemsu-category-card__icon" aria-hidden="true"></i>
                                             <h3 class="h6 mb-1"><?php echo htmlspecialchars($card['name']); ?></h3>
                                             <p class="small text-muted mb-2"><?php echo htmlspecialchars($card['example']); ?></p>
                                             <span class="badge bg-light text-dark border"><i class="bi bi-signpost-2 me-1" aria-hidden="true"></i><?php echo htmlspecialchars($card['route']); ?></span>
+                                            <?php echo severityBadgeHtml(severityForCategory($card['name'])); ?>
                                         </div>
                                     </div>
                                 <?php endforeach; ?>
@@ -197,19 +210,6 @@ $pageScripts = ['assets/js/wizard.js'];
                                     <textarea class="form-control" id="complaint_description" name="complaint_description" rows="5" required></textarea>
                                     <div class="form-text" id="descCounter">0 characters</div>
                                 </div>
-                                <div class="col-md-6">
-                                    <label for="respondent_name" class="form-label">Respondent name</label>
-                                    <input type="text" class="form-control" id="respondent_name" name="respondent_name">
-                                </div>
-                                <div class="col-md-6">
-                                    <label for="respondent_type" class="form-label">Respondent type</label>
-                                    <select class="form-select" id="respondent_type" name="respondent_type">
-                                        <option value="">Select type</option>
-                                        <?php foreach (allowedRespondentTypes() as $rt): ?>
-                                            <option value="<?php echo htmlspecialchars($rt); ?>"><?php echo htmlspecialchars(formatStatus($rt)); ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
                                 <div class="col-md-4">
                                     <label for="incident_date" class="form-label">Incident date *</label>
                                     <input type="date" class="form-control" id="incident_date" name="incident_date" required max="<?php echo date('Y-m-d'); ?>">
@@ -219,12 +219,25 @@ $pageScripts = ['assets/js/wizard.js'];
                                     <input type="text" class="form-control" id="incident_location" name="incident_location">
                                 </div>
                                 <div class="col-md-4">
-                                    <label for="severity" class="form-label">Severity *</label>
-                                    <select class="form-select" id="severity" name="severity" required>
-                                        <?php foreach (allowedSeverities() as $sev): ?>
-                                            <option value="<?php echo htmlspecialchars($sev); ?>" <?php echo $sev === 'medium' ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($sev)); ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
+                                    <label for="severity_display" class="form-label">Severity</label>
+                                    <input type="text" class="form-control" id="severity_display" value="Choose the nature of the complaint first" readonly tabindex="-1">
+                                    <div class="form-text">Set automatically from the nature of the complaint.</div>
+                                </div>
+                                <!-- Person involved (optional). Hidden for Campus Facilities by assets/js/wizard.js. -->
+                                <div class="col-12" id="personInvolvedFields" data-hide-for-category="Campus Facilities">
+                                    <div class="row g-3">
+                                        <div class="col-md-5">
+                                            <label for="person_name" class="form-label">Name of person involved <small class="text-muted">(optional)</small></label>
+                                            <input type="text" class="form-control" id="person_name" name="person_name" maxlength="200" autocomplete="off">
+                                            <div class="form-text">Only if you want to name someone.</div>
+                                        </div>
+                                        <div class="col-md-7" id="personDetailsField" hidden>
+                                            <label for="person_details" class="form-label">Short description of the person *</label>
+                                            <input type="text" class="form-control" id="person_details" name="person_details" maxlength="255"
+                                                   placeholder="e.g. my instructor in Programming 2, a classmate, office staff">
+                                            <div class="form-text">Who they are or how they are involved.</div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label" for="supporting_documents">Supporting evidence (optional)</label>

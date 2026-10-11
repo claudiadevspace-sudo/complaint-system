@@ -1,4 +1,9 @@
 <?php
+// Command line only (php migrate_settings.php): never run from a browser.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 /**
  * Migration: system settings edited by the Super Admin.
  *

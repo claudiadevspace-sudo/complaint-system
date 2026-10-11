@@ -44,7 +44,7 @@ include 'includes/super_admin_top.php';
 ?>
 
 <!-- Locked accounts -->
-<div class="card nemsu-panel mb-4" id="locked">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4" id="locked">
     <div class="card-header"><i class="bi bi-lock me-2" aria-hidden="true"></i>Locked accounts (<?php echo count($locked); ?>)</div>
     <div class="card-body p-0">
         <?php if (!$locked): ?>
@@ -87,7 +87,7 @@ include 'includes/super_admin_top.php';
 </div>
 
 <!-- Filters -->
-<form method="GET" class="card nemsu-panel mb-3">
+<form method="GET" data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-3">
     <div class="card-body row g-2 align-items-end">
         <div class="col-6 col-md-2">
             <label for="from" class="form-label small">From</label>
@@ -127,7 +127,7 @@ include 'includes/super_admin_top.php';
 </form>
 
 <!-- Login attempts -->
-<div class="card nemsu-panel">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
     <div class="card-header d-flex justify-content-between flex-wrap gap-2">
         <span><i class="bi bi-list-check me-2" aria-hidden="true"></i>Login attempts (<?php echo $events['total']; ?>)</span>
         <small class="text-muted"><span class="badge bg-danger-subtle text-danger-emphasis">Red rows</span> are suspicious</small>

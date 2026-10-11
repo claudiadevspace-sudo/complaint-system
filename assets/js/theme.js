@@ -1,34 +1,34 @@
 (function () {
     'use strict';
 
-    var storageKey = 'nemsu-theme';
+    /*
+     * Light / dark mode switch in the navbar (dashboards only).
+     *
+     * The mode is saved in the 'nemsu_theme' cookie and the page reloads, so
+     * PHP renders it in the chosen mode (see appTheme() in config.php). Doing
+     * it on the server means pages never flash the wrong colours while
+     * loading, and the sign-in pages are never affected: appTheme() only
+     * applies the cookie while someone is signed in.
+     */
+    var COOKIE = 'nemsu_theme';
 
-    function applyTheme(theme) {
-        document.documentElement.setAttribute('data-theme', theme);
-        var btn = document.getElementById('themeToggle');
-        if (btn) {
-            var icon = btn.querySelector('i');
-            if (icon) {
-                icon.className = theme === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
-            }
-        }
+    function saveTheme(theme) {
+        // One year, whole site, sent only to this site.
+        document.cookie = COOKIE + '=' + theme + '; path=/; max-age=31536000; SameSite=Lax';
     }
 
-    function initTheme() {
-        var saved = localStorage.getItem(storageKey);
-        var theme = saved === 'dark' ? 'dark' : 'light';
-        applyTheme(theme);
-
+    document.addEventListener('DOMContentLoaded', function () {
         var btn = document.getElementById('themeToggle');
         if (!btn) {
-            return;
+            return;   // sign-in / registration pages have no toggle
         }
         btn.addEventListener('click', function () {
-            var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-            localStorage.setItem(storageKey, next);
-            applyTheme(next);
+            var next = btn.getAttribute('data-current-theme') === 'dark' ? 'light' : 'dark';
+            saveTheme(next);
+            btn.disabled = true;
+            // Open the same address again (a GET), not reload(): reloading a page
+            // that was the result of a form would ask to re-send the form.
+            window.location.assign(window.location.href.split('#')[0]);
         });
-    }
-
-    document.addEventListener('DOMContentLoaded', initTheme);
+    });
 })();

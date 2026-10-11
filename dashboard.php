@@ -21,22 +21,37 @@ $totalComplaints = count($allComplaints);
 $pendingCount = count(array_filter($allComplaints, fn($c) => ($c['status'] ?? '') === 'pending'));
 $inProgressCount = count(array_filter($allComplaints, fn($c) => in_array($c['status'] ?? '', ['under_review', 'investigating'], true)));
 $resolvedCount = count(array_filter($allComplaints, fn($c) => ($c['status'] ?? '') === 'resolved'));
-$criticalCount = count(array_filter($allComplaints, fn($c) => in_array($c['severity'] ?? '', ['high', 'critical'], true)));
+$criticalCount = count(array_filter($allComplaints, fn($c) => isUrgentSeverity($c['severity'] ?? '')));
 
 $filterStatus = sanitizeInput($_GET['status'] ?? '');
 $filterSeverity = sanitizeInput($_GET['severity'] ?? '');
 $filterCategory = sanitizeInput($_GET['category'] ?? '');
 $filterQ = sanitizeInput($_GET['q'] ?? '');
-$sort = sanitizeInput($_GET['sort'] ?? 'date_desc');
+// Default: most serious severity first (then newest).
+$sort = sanitizeInput($_GET['sort'] ?? 'severity');
 $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 10;
 
+/**
+ * Status filter. "in_progress" (the In progress card) covers both
+ * under_review and investigating; any other value is one exact status.
+ */
+function matchesStatusFilter($status, $filter) {
+    if ($filter === '') {
+        return true;
+    }
+    if ($filter === 'in_progress') {
+        return in_array($status, ['under_review', 'investigating'], true);
+    }
+    return $status === $filter;
+}
+
 if ($userRole !== 'student') {
     $complaints = array_values(array_filter($complaints, function ($c) use ($filterStatus, $filterSeverity, $filterCategory, $filterQ) {
-        if ($filterStatus !== '' && ($c['status'] ?? '') !== $filterStatus) {
+        if (!matchesStatusFilter($c['status'] ?? '', $filterStatus)) {
             return false;
         }
-        if ($filterSeverity !== '' && ($c['severity'] ?? '') !== $filterSeverity) {
+        if ($filterSeverity !== '' && normalizeSeverity($c['severity'] ?? '') !== $filterSeverity) {
             return false;
         }
         if ($filterCategory !== '' && ($c['complaint_category'] ?? '') !== $filterCategory) {
@@ -51,16 +66,15 @@ if ($userRole !== 'student') {
         return true;
     }));
 
-    usort($complaints, function ($a, $b) use ($sort) {
-        if ($sort === 'severity') {
-            $order = ['critical' => 4, 'high' => 3, 'medium' => 2, 'low' => 1];
-            return ($order[$b['severity'] ?? 'low'] ?? 0) <=> ($order[$a['severity'] ?? 'low'] ?? 0);
-        }
-        if ($sort === 'date_asc') {
-            return strcmp($a['created_at'] ?? '', $b['created_at'] ?? '');
-        }
-        return strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
-    });
+    if ($sort === 'date_desc' || $sort === 'date_asc') {
+        usort($complaints, function ($a, $b) use ($sort) {
+            return $sort === 'date_asc'
+                ? strcmp($a['created_at'] ?? '', $b['created_at'] ?? '')
+                : strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
+        });
+    } else {
+        sortComplaintsBySeverity($complaints);
+    }
 
     $totalFiltered = count($complaints);
     $totalPages = max(1, (int)ceil($totalFiltered / $perPage));
@@ -69,8 +83,10 @@ if ($userRole !== 'student') {
     }
     $complaintsPage = array_slice($complaints, ($page - 1) * $perPage, $perPage);
 } else {
+    // Students: the stat cards filter their own list by status.
+    $complaints = array_values(array_filter($complaints, fn($c) => matchesStatusFilter($c['status'] ?? '', $filterStatus)));
     $complaintsPage = $complaints;
-    $totalFiltered = $totalComplaints;
+    $totalFiltered = count($complaints);
     $totalPages = 1;
     $page = 1;
 }
@@ -122,7 +138,7 @@ function dashboardQuery(array $overrides = []) {
             </div>
 
             <?php if ($userRole === 'student'): ?>
-                <section class="nemsu-hero-card mb-4" aria-labelledby="your-case-heading">
+                <section class="card nemsu-hero-card mb-4" data-bs-theme="<?php echo appTheme(); ?>" aria-labelledby="your-case-heading">
                     <div class="row g-3 align-items-center">
                         <div class="col-lg-8">
                             <h2 id="your-case-heading" class="h5 mb-2"><i class="bi bi-folder2-open me-2" aria-hidden="true"></i>Your case</h2>
@@ -151,53 +167,42 @@ function dashboardQuery(array $overrides = []) {
                 </section>
             <?php endif; ?>
 
+            <?php
+            // Stat cards: all in the sidebar's blue, and each one is a link that
+            // filters the complaint list below by status ("" = all complaints).
+            $statCards = [
+                ['', 'Total', 'inbox', $totalComplaints],
+                ['pending', 'Pending', 'hourglass-split', $pendingCount],
+                ['in_progress', 'In progress', 'arrow-repeat', $inProgressCount],
+                ['resolved', 'Resolved', 'check2-circle', $resolvedCount],
+            ];
+            ?>
             <div class="row mb-4 nemsu-stat-grid g-3">
-                <div class="col-6 col-md-3">
-                    <div class="card nemsu-stat-card nemsu-stat-card--blue h-100">
-                        <div class="card-body">
-                            <i class="bi bi-inbox stat-icon" aria-hidden="true"></i>
-                            <h3 class="h6 card-title">Total</h3>
-                            <p class="display-6 mb-0"><?php echo $userRole === 'student' ? $totalComplaints : $totalFiltered; ?></p>
-                        </div>
+                <?php foreach ($statCards as [$cardStatus, $cardLabel, $cardIcon, $cardCount]): ?>
+                    <?php $isActive = $filterStatus === $cardStatus; ?>
+                    <div class="col-6 col-md-3">
+                        <a href="dashboard.php<?php echo $cardStatus !== '' ? '?status=' . $cardStatus : ''; ?>#work-queue"
+                           class="card nemsu-stat-card nemsu-stat-card--nav nemsu-stat-card--link h-100<?php echo $isActive ? ' is-active' : ''; ?>"
+                           <?php echo $isActive ? 'aria-current="true"' : ''; ?>
+                           aria-label="<?php echo $cardLabel; ?>: <?php echo (int)$cardCount; ?> complaint(s). Show <?php echo $cardStatus === '' ? 'all complaints' : strtolower($cardLabel) . ' complaints'; ?>">
+                            <div class="card-body">
+                                <i class="bi bi-<?php echo $cardIcon; ?> stat-icon" aria-hidden="true"></i>
+                                <h3 class="h6 card-title"><?php echo $cardLabel; ?></h3>
+                                <p class="display-6 mb-0"><?php echo (int)$cardCount; ?></p>
+                            </div>
+                        </a>
                     </div>
-                </div>
-                <div class="col-6 col-md-3">
-                    <div class="card nemsu-stat-card nemsu-stat-card--gold h-100">
-                        <div class="card-body">
-                            <i class="bi bi-hourglass-split stat-icon" aria-hidden="true"></i>
-                            <h3 class="h6 card-title">Pending</h3>
-                            <p class="display-6 mb-0"><?php echo $pendingCount; ?></p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3">
-                    <div class="card nemsu-stat-card nemsu-stat-card--sky h-100">
-                        <div class="card-body">
-                            <i class="bi bi-arrow-repeat stat-icon" aria-hidden="true"></i>
-                            <h3 class="h6 card-title">In progress</h3>
-                            <p class="display-6 mb-0"><?php echo $inProgressCount; ?></p>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3">
-                    <div class="card nemsu-stat-card nemsu-stat-card--success h-100">
-                        <div class="card-body">
-                            <i class="bi bi-check2-circle stat-icon" aria-hidden="true"></i>
-                            <h3 class="h6 card-title">Resolved</h3>
-                            <p class="display-6 mb-0"><?php echo $resolvedCount; ?></p>
-                        </div>
-                    </div>
-                </div>
+                <?php endforeach; ?>
             </div>
 
             <?php if ($userRole !== 'student' && $criticalCount > 0): ?>
                 <div class="alert alert-warning d-flex align-items-center gap-2" role="status">
                     <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
-                    <span><?php echo (int)$criticalCount; ?> case(s) marked high or critical severity need attention.</span>
+                    <span><?php echo (int)$criticalCount; ?> case(s) with Severity 1 or 2 (academic integrity or unprofessional behavior) need attention.</span>
                 </div>
             <?php endif; ?>
 
-            <div class="card nemsu-panel">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel" id="work-queue">
                 <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <h2 class="h6 mb-0">
                         <?php
@@ -220,6 +225,7 @@ function dashboardQuery(array $overrides = []) {
                                 <label for="status" class="form-label small mb-1">Status</label>
                                 <select class="form-select form-select-sm" id="status" name="status">
                                     <option value="">All</option>
+                                    <option value="in_progress" <?php echo $filterStatus === 'in_progress' ? 'selected' : ''; ?>>In progress (review + investigating)</option>
                                     <?php foreach (allowedComplaintStatuses() as $st): ?>
                                         <option value="<?php echo htmlspecialchars($st); ?>" <?php echo $filterStatus === $st ? 'selected' : ''; ?>><?php echo htmlspecialchars(formatStatus($st)); ?></option>
                                     <?php endforeach; ?>
@@ -230,16 +236,16 @@ function dashboardQuery(array $overrides = []) {
                                 <select class="form-select form-select-sm" id="severity" name="severity">
                                     <option value="">All</option>
                                     <?php foreach (allowedSeverities() as $sev): ?>
-                                        <option value="<?php echo htmlspecialchars($sev); ?>" <?php echo $filterSeverity === $sev ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($sev)); ?></option>
+                                        <option value="<?php echo htmlspecialchars($sev); ?>" <?php echo $filterSeverity === $sev ? 'selected' : ''; ?>><?php echo htmlspecialchars(severityMeta($sev)['long']); ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
                             <div class="col-md-2">
                                 <label for="sort" class="form-label small mb-1">Sort</label>
                                 <select class="form-select form-select-sm" id="sort" name="sort">
+                                    <option value="severity" <?php echo $sort === 'severity' ? 'selected' : ''; ?>>Severity (highest first)</option>
                                     <option value="date_desc" <?php echo $sort === 'date_desc' ? 'selected' : ''; ?>>Newest</option>
                                     <option value="date_asc" <?php echo $sort === 'date_asc' ? 'selected' : ''; ?>>Oldest</option>
-                                    <option value="severity" <?php echo $sort === 'severity' ? 'selected' : ''; ?>>Severity</option>
                                 </select>
                             </div>
                             <div class="col-md-3 d-flex gap-2">
@@ -262,7 +268,7 @@ function dashboardQuery(array $overrides = []) {
                     <?php else: ?>
                         <div class="d-md-none p-3 vstack gap-3">
                             <?php foreach ($complaintsPage as $comp): ?>
-                                <?php $rowCritical = in_array($comp['severity'] ?? '', ['high', 'critical'], true); ?>
+                                <?php $rowCritical = isUrgentSeverity($comp['severity'] ?? ''); ?>
                                 <article class="nemsu-complaint-card <?php echo $rowCritical ? 'nemsu-complaint-card--critical' : ''; ?>">
                                     <div class="d-flex justify-content-between gap-2 mb-2">
                                         <span class="text-muted small">#<?php echo (int)$comp['complaint_id']; ?></span>
@@ -270,7 +276,7 @@ function dashboardQuery(array $overrides = []) {
                                     </div>
                                     <h3 class="h6 mb-2"><?php echo htmlspecialchars($comp['complaint_title']); ?></h3>
                                     <div class="d-flex flex-wrap gap-2 mb-3">
-                                        <?php echo statusBadgeHtml($comp['status']); ?>
+                                        <?php echo statusBadgeHtml($comp['status']) . viewOnlyBadgeHtml($comp); ?>
                                         <?php echo severityBadgeHtml($comp['severity']); ?>
                                     </div>
                                     <a href="view_complaint.php?id=<?php echo (int)$comp['complaint_id']; ?>" class="btn btn-sm btn-outline-primary w-100">View details</a>
@@ -295,7 +301,7 @@ function dashboardQuery(array $overrides = []) {
                                 <tbody>
                                     <?php foreach ($complaintsPage as $comp): ?>
                                         <?php
-                                        $rowCritical = in_array($comp['severity'] ?? '', ['high', 'critical'], true);
+                                        $rowCritical = isUrgentSeverity($comp['severity'] ?? '');
                                         $overdue = ($comp['status'] ?? '') === 'pending' && strtotime($comp['created_at']) < strtotime('-7 days');
                                         ?>
                                         <tr class="<?php echo $rowCritical ? 'table-danger' : ($overdue ? 'table-warning' : ''); ?>">
@@ -305,7 +311,7 @@ function dashboardQuery(array $overrides = []) {
                                             <?php endif; ?>
                                             <td><?php echo htmlspecialchars($comp['complaint_title']); ?></td>
                                             <td><small><?php echo htmlspecialchars($comp['complaint_category'] ?? '—'); ?></small></td>
-                                            <td><?php echo statusBadgeHtml($comp['status']); ?></td>
+                                            <td><?php echo statusBadgeHtml($comp['status']) . viewOnlyBadgeHtml($comp); ?></td>
                                             <td><?php echo severityBadgeHtml($comp['severity']); ?></td>
                                             <td><?php echo date('M j, Y', strtotime($comp['created_at'])); ?></td>
                                             <td><a href="view_complaint.php?id=<?php echo (int)$comp['complaint_id']; ?>" class="btn btn-sm btn-primary">Open</a></td>

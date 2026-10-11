@@ -69,7 +69,37 @@ class EnrollmentList {
             return ['ok' => false, 'message' => 'An account already exists for Student ID ' . $id . '. '
                 . 'Sign in instead, or contact Student Services if you cannot access it.'];
         }
+        // The account is made ONLY from OSWD's record (the student types just a
+        // password), so the record must have everything an account needs.
+        $missing = $this->missingForRegistration($record);
+        if ($missing) {
+            return ['ok' => false, 'message' => 'Your enrolled record (Student ID ' . $id . ') is missing: '
+                . implode(', ', $missing) . '. Please ask OSWD to complete it, then register again.'];
+        }
+        $taken = $this->db->prepare('SELECT 1 FROM users WHERE email = :e LIMIT 1');
+        $taken->execute([':e' => $record['email']]);
+        if ($taken->fetchColumn()) {
+            return ['ok' => false, 'message' => 'The email on your enrolled record is already used by another account. Please contact OSWD.'];
+        }
         return ['ok' => true, 'record' => $record];
+    }
+
+    /** Details an account needs that this enrolled record does not have yet. */
+    public function missingForRegistration(array $record) {
+        $missing = [];
+        if (trim((string)($record['full_name'] ?? '')) === '') {
+            $missing[] = 'full name';
+        }
+        if (!in_array($record['department'] ?? '', departments(), true)) {
+            $missing[] = 'department';
+        }
+        if (canonicalProgram($record['department'] ?? '', $record['program'] ?? '') === null) {
+            $missing[] = 'program';
+        }
+        if (!filter_var($record['email'] ?? '', FILTER_VALIDATE_EMAIL)) {
+            $missing[] = 'email';
+        }
+        return $missing;
     }
 
     /* ==============================================================
@@ -92,9 +122,10 @@ class EnrollmentList {
         $where = [];
         $params = [];
         if (!empty($f['q'])) {
-            $where[] = '(e.student_id LIKE :q1 OR e.full_name LIKE :q2)';
+            $where[] = '(e.student_id LIKE :q1 OR e.full_name LIKE :q2 OR e.email LIKE :q3)';
             $params[':q1'] = '%' . $f['q'] . '%';
             $params[':q2'] = '%' . $f['q'] . '%';
+            $params[':q3'] = '%' . $f['q'] . '%';
         }
         if (in_array($f['department'] ?? '', departments(), true)) {
             $where[] = 'e.department = :department';
@@ -122,12 +153,28 @@ class EnrollmentList {
     }
 
     /** Add or update one student by hand. */
-    public function addOne($studentId, $fullName, $department, $uploadedBy) {
+    public function addOne($studentId, $fullName, $department, $uploadedBy, $program = '', $email = '', $contact = '') {
         $id = self::normalizeId($studentId);
         if (!self::isValidIdFormat($id)) {
             return ['success' => false, 'message' => 'Enter a valid Student ID (letters, numbers and dashes).'];
         }
-        $this->upsert($id, trim((string)$fullName), $this->matchDepartment($department), '', $uploadedBy);
+        $department = $this->matchDepartment($department);
+        // Program: one of the department's official programs (Settings → Programs).
+        $program = trim((string)$program);
+        if ($program !== '') {
+            $official = $department ? canonicalProgram($department, $program) : null;
+            if ($official === null) {
+                return ['success' => false, 'message' => $department
+                    ? 'Choose a program that belongs to ' . $department . '.'
+                    : 'Choose a department before choosing a program.'];
+            }
+            $program = $official;
+        }
+        $email = trim((string)$email);
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'Enter a valid email address.'];
+        }
+        $this->upsert($id, trim((string)$fullName), $department, $program, $uploadedBy, $email, trim((string)$contact));
         (new AuditLog())->record('enrollment_add', 'enrollment', null, $id);
         return ['success' => true, 'message' => 'Student ID ' . $id . ' is on the enrolled list.'];
     }
@@ -183,7 +230,7 @@ class EnrollmentList {
                 $this->db->exec('DELETE FROM enrolled_students');
             }
             foreach ($records as $r) {
-                $affected = $this->upsert($r['student_id'], $r['full_name'], $r['department'], $r['program'], $uploadedBy);
+                $affected = $this->upsert($r['student_id'], $r['full_name'], $r['department'], $r['program'], $uploadedBy, $r['email'], $r['contact_number']);
                 if ($affected === 1) {
                     $added++;
                 } elseif ($affected === 2) {
@@ -218,20 +265,25 @@ class EnrollmentList {
      * details in the file never erase details already stored.
      * Returns MySQL's affected rows: 1 = inserted, 2 = updated, 0 = unchanged.
      */
-    private function upsert($id, $fullName, $department, $program, $uploadedBy) {
+    private function upsert($id, $fullName, $department, $program, $uploadedBy, $email = '', $contact = '') {
         $stmt = $this->db->prepare(
-            'INSERT INTO enrolled_students (student_id, full_name, department, program, uploaded_by)
-             VALUES (:id, :name, :dept, :program, :by)
+            'INSERT INTO enrolled_students (student_id, full_name, department, program, email, contact_number, uploaded_by)
+             VALUES (:id, :name, :dept, :program, :email, :contact, :by)
              ON DUPLICATE KEY UPDATE
                 full_name = COALESCE(VALUES(full_name), full_name),
                 department = COALESCE(VALUES(department), department),
-                program = COALESCE(VALUES(program), program)'
+                program = COALESCE(VALUES(program), program),
+                email = COALESCE(VALUES(email), email),
+                contact_number = COALESCE(VALUES(contact_number), contact_number)'
         );
+        $email = strtolower(trim((string)$email));
         $stmt->execute([
             ':id' => $id,
             ':name' => $fullName !== '' ? $fullName : null,
             ':dept' => $department,
             ':program' => $program !== '' ? $program : null,
+            ':email' => filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null,
+            ':contact' => trim((string)$contact) !== '' ? mb_substr(trim((string)$contact), 0, 20) : null,
             ':by' => $uploadedBy,
         ]);
         return $stmt->rowCount();
@@ -253,7 +305,7 @@ class EnrollmentList {
      * otherwise the first column is the ID and the second (if any) the name.
      */
     private function extractRecords(array $rows) {
-        $cols = ['id' => 0, 'name' => 1, 'department' => null, 'program' => null];
+        $cols = ['id' => 0, 'name' => 1, 'department' => null, 'program' => null, 'email' => null, 'contact' => null];
         if ($rows) {
             $header = array_map(fn($h) => strtolower(trim((string)$h)), $rows[0]);
             $idCol = null;
@@ -265,9 +317,16 @@ class EnrollmentList {
             }
             if ($idCol !== null) {
                 array_shift($rows);   // header row is not data
-                $cols = ['id' => $idCol, 'name' => null, 'department' => null, 'program' => null];
+                $cols = ['id' => $idCol, 'name' => null, 'department' => null, 'program' => null, 'email' => null, 'contact' => null];
                 foreach ($header as $i => $h) {
-                    if ($cols['name'] === null && preg_match('/name/', $h)) {
+                    if ($i === $idCol) {
+                        continue;
+                    }
+                    if ($cols['email'] === null && preg_match('/e-?mail|gmail/', $h)) {
+                        $cols['email'] = $i;
+                    } elseif ($cols['contact'] === null && preg_match('/contact|phone|mobile|cell/', $h)) {
+                        $cols['contact'] = $i;
+                    } elseif ($cols['name'] === null && preg_match('/name/', $h)) {
                         $cols['name'] = $i;
                     } elseif ($cols['department'] === null && preg_match('/dep|dept|college/', $h)) {
                         $cols['department'] = $i;
@@ -300,6 +359,8 @@ class EnrollmentList {
                 'full_name' => $cols['name'] !== null ? trim((string)($row[$cols['name']] ?? '')) : '',
                 'department' => $cols['department'] !== null ? $this->matchDepartment($row[$cols['department']] ?? '') : null,
                 'program' => $cols['program'] !== null ? trim((string)($row[$cols['program']] ?? '')) : '',
+                'email' => $cols['email'] !== null ? trim((string)($row[$cols['email']] ?? '')) : '',
+                'contact_number' => $cols['contact'] !== null ? trim((string)($row[$cols['contact']] ?? '')) : '',
             ];
         }
         return [array_values($records), $invalid, $duplicates];

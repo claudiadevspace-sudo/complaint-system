@@ -28,6 +28,9 @@ $migrations = [
     'migrate_user_presence.php',
     'migrate_enrolled_students.php',
     'migrate_settings.php',
+    'migrate_user_archive.php',
+    'migrate_program_routing.php',
+    'migrate_resolution_proof.php',
 ];
 
 echo "=== OSWD Complaint System Setup ===\n\n";

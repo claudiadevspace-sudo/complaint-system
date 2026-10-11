@@ -1,4 +1,9 @@
 <?php
+// Command line only (php migrate_department_routing.php): never run from a browser.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 /**
  * Migration: department-based complaint routing.
  *

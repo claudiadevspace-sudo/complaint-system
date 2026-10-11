@@ -21,29 +21,33 @@ class Complaint {
             $currentLevel = initialWorkflowLevel($complaintType);
             // Snapshot of the student's department; routing uses this value.
             $department = $this->complainantDepartment($data['complainant_id']);
+            // ...and the program, which picks the Program Coordinator.
+            $program = $this->complainantProgram($data['complainant_id'], $department);
 
-            $sql = "INSERT INTO complaints (complainant_id, respondent_name, respondent_type,
+            $sql = "INSERT INTO complaints (complainant_id, respondent_name, respondent_type, respondent_details,
                     complaint_title, complaint_description, complaint_category, predicted_category,
-                    complaint_type, department, incident_date, incident_location, severity, supporting_documents,
+                    complaint_type, department, program, incident_date, incident_location, severity, supporting_documents,
                     current_level)
-                    VALUES (:complainant_id, :respondent_name, :respondent_type, :complaint_title,
+                    VALUES (:complainant_id, :respondent_name, :respondent_type, :respondent_details, :complaint_title,
                     :complaint_description, :complaint_category, :predicted_category, :complaint_type,
-                    :department, :incident_date, :incident_location, :severity, :supporting_documents, :current_level)";
+                    :department, :program, :incident_date, :incident_location, :severity, :supporting_documents, :current_level)";
 
             $stmt = $this->db->prepare($sql);
             $stmt->execute([
                 ':complainant_id' => $data['complainant_id'],
                 ':respondent_name' => emptyToNull($data['respondent_name'] ?? null),
                 ':respondent_type' => emptyToNull($data['respondent_type'] ?? null),
+                ':respondent_details' => emptyToNull($data['respondent_details'] ?? null),
                 ':complaint_title' => $data['complaint_title'],
                 ':complaint_description' => $data['complaint_description'],
                 ':complaint_category' => emptyToNull($category),
                 ':predicted_category' => emptyToNull($data['predicted_category'] ?? null),
                 ':complaint_type' => $complaintType,
                 ':department' => $department,
+                ':program' => $program,
                 ':incident_date' => $data['incident_date'],
                 ':incident_location' => emptyToNull($data['incident_location'] ?? null),
-                ':severity' => $data['severity'] ?? 'medium',
+                ':severity' => severityForCategory($category),
                 ':supporting_documents' => emptyToNull($data['supporting_documents'] ?? null),
                 ':current_level' => $currentLevel
             ]);
@@ -51,7 +55,7 @@ class Complaint {
             $complaintId = $this->db->lastInsertId();
             $this->addTimeline($complaintId, $data['complainant_id'], 'created', 'Complaint submitted');
             // May land on a higher level if the department has nobody at this one.
-            $route = $this->assignToRole($complaintId, $currentLevel, $data['complainant_id'], true, $department);
+            $route = $this->assignToRole($complaintId, $currentLevel, $data['complainant_id'], true, $department, $program);
 
             $this->db->commit();
 
@@ -93,9 +97,32 @@ class Complaint {
             return true;
         }
         if (in_array($role, staffRoles(), true)) {
-            return (int)($complaint['assigned_to'] ?? 0) === (int)$userId;
+            // The current holder, or staff who handled it before and escalated
+            // it (they keep a read-only view, see canManageComplaint).
+            return (int)($complaint['assigned_to'] ?? 0) === (int)$userId
+                || (in_array($role, officeRoles(), true) && ($complaint['current_level'] ?? '') === $role)
+                || $this->hasHandled((int)$complaint['complaint_id'], $userId);
         }
         return (int)$complaint['complainant_id'] === (int)$userId;
+    }
+
+    /** Did this staff member escalate the complaint onward (so they handled it before)? */
+    public function hasHandled($complaintId, $userId) {
+        $stmt = $this->db->prepare('SELECT 1 FROM complaint_escalations WHERE complaint_id = :c AND escalated_by = :u LIMIT 1');
+        $stmt->execute([':c' => (int)$complaintId, ':u' => (int)$userId]);
+        return (bool)$stmt->fetchColumn();
+    }
+
+    /**
+     * Who may post a comment: the student who filed it, and the staff member
+     * who holds it now. Everyone else (e.g. a coordinator after escalating,
+     * or OSWD looking at a complaint still at a lower level) is read-only.
+     */
+    public function canComment($complaint, $userId, $role) {
+        if ($role === 'student') {
+            return $complaint && (int)$complaint['complainant_id'] === (int)$userId;
+        }
+        return $this->canManageComplaint($complaint, $userId, $role);
     }
 
     public function canManageComplaint($complaint, $userId, $role) {
@@ -106,8 +133,8 @@ class Complaint {
             if (($complaint['current_level'] ?? '') !== $role) {
                 return false;
             }
-            if ($role === 'oswd') {
-                return true;
+            if (in_array($role, officeRoles(), true)) {
+                return true;   // shared office: any Guidance / OSWD account
             }
             return (int)($complaint['assigned_to'] ?? 0) === (int)$userId;
         }
@@ -121,7 +148,9 @@ class Complaint {
         if (($complaint['complaint_type'] ?? 'behavioral') === 'services') {
             return false;
         }
-        if (in_array($complaint['status'], ['resolved', 'rejected'], true)) {
+        // Pending = not looked at yet: the handler must change the status
+        // (e.g. to Under review) before they can escalate it.
+        if (in_array($complaint['status'], ['pending', 'resolved', 'rejected'], true)) {
             return false;
         }
         return nextWorkflowLevel($complaint['current_level'] ?? '') !== null;
@@ -138,16 +167,63 @@ class Complaint {
         return $stmt->fetchAll();
     }
 
-    public function getAssignedComplaints($userId) {
+    public function getAssignedComplaints($userId, $role = null) {
+        // Guidance is one shared office: every complaint at its level is listed.
+        $office = $role !== null && in_array($role, officeRoles(), true) ? $role : null;
         $sql = "SELECT c.*, COALESCE(u.alias, 'Anonymous student') as complainant_name, a.full_name as assigned_name
                 FROM complaints c
                 INNER JOIN users u ON c.complainant_id = u.user_id
                 LEFT JOIN users a ON c.assigned_to = a.user_id
                 WHERE c.assigned_to = :user_id
+                   OR (:office <> '' AND c.current_level = :office2)
+                   OR EXISTS (SELECT 1 FROM complaint_escalations e WHERE e.complaint_id = c.complaint_id AND e.escalated_by = :handler)
                 ORDER BY c.created_at DESC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([':user_id' => $userId]);
+        $stmt->execute([':user_id' => $userId, ':handler' => $userId, ':office' => (string)$office, ':office2' => (string)$office]);
+        // Escalated onward by this user: still listed, but view only.
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$row) {
+            $row['view_only'] = (int)($row['assigned_to'] ?? 0) !== (int)$userId
+                && !($office && ($row['current_level'] ?? '') === $office);
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /**
+     * "Escalated to me" for a shared office (OSWD): complaints that reached
+     * this level by escalation (not the ones routed here directly, such as
+     * Campus Services / Facilities), from every department and program.
+     */
+    public function getEscalatedToOffice($role) {
+        $sql = "SELECT c.*, COALESCE(u.alias, 'Anonymous student') as complainant_name, a.full_name as assigned_name, 0 AS view_only
+                FROM complaints c
+                INNER JOIN users u ON c.complainant_id = u.user_id
+                LEFT JOIN users a ON c.assigned_to = a.user_id
+                WHERE c.current_level = :role
+                  AND EXISTS (SELECT 1 FROM complaint_escalations e INNER JOIN users t ON t.user_id = e.escalated_to
+                              WHERE e.complaint_id = c.complaint_id AND t.role = :role2)
+                ORDER BY c.created_at DESC";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([':role' => $role, ':role2' => $role]);
         return $stmt->fetchAll();
+    }
+
+    /** Campus Services & Facilities complaints (they go directly to OSWD). */
+    public function getServiceComplaints() {
+        $sql = "SELECT c.*, COALESCE(u.alias, 'Anonymous student') as complainant_name, a.full_name as assigned_name, 0 AS view_only
+                FROM complaints c
+                INNER JOIN users u ON c.complainant_id = u.user_id
+                LEFT JOIN users a ON c.assigned_to = a.user_id
+                WHERE c.complaint_type = 'services'
+                ORDER BY c.created_at DESC";
+        return $this->db->query($sql)->fetchAll();
+    }
+
+    /** Is the typed "person involved" this staff account? (personNameMatches in config.php) */
+    private function namesStaff($typedName, $staffId) {
+        $staff = (new User())->getUserById((int)$staffId);
+        return $staff && personNameMatches($typedName, $staff['full_name'] ?? '', $staff['username'] ?? '');
     }
 
     public function getComplaintsForDashboard($userId, $role) {
@@ -157,7 +233,7 @@ class Complaint {
         if ($role === 'oswd') {
             return $this->getAllComplaints();
         }
-        return $this->getAssignedComplaints($userId);
+        return $this->getAssignedComplaints($userId, $role);
     }
     
     public function getAllComplaints($filters = []) {
@@ -195,6 +271,12 @@ class Complaint {
             return ['success' => true];
         }
 
+        // A complaint can only be resolved after staff uploaded proof AND the
+        // student approved it (see ResolutionProof). Enforced here, on the server.
+        if ($newStatus === 'resolved' && !(new ResolutionProof())->canResolve($complaintId)) {
+            return ['success' => false, 'message' => 'Upload proof of the resolution first. The complaint can be resolved once the student approves it.'];
+        }
+
         try {
             $sql = "UPDATE complaints SET status = :status WHERE complaint_id = :complaint_id";
             $stmt = $this->db->prepare($sql);
@@ -219,38 +301,82 @@ class Complaint {
     public function addComment($complaintId, $userId, $comment) {
         $comment = trim((string)$comment);
         if ($comment === '') {
-            return ['success' => false, 'message' => 'Comment cannot be empty'];
+            return ['success' => false, 'message' => 'Message cannot be empty'];
         }
-        $sql = "INSERT INTO complaint_comments (complaint_id, user_id, comment_text) 
-                VALUES (:complaint_id, :user_id, :comment_text)";
+        $complaint = $this->getComplaintById($complaintId);
+        $author = (new User())->getUserById((int)$userId);
+        if (!$complaint || !$author || !$this->canComment($complaint, $userId, $author['role'])) {
+            return ['success' => false, 'message' => 'You can only view this complaint, not chat on it.'];
+        }
+        // Private thread: a staff comment belongs to its author's conversation;
+        // a student's reply goes to whoever holds the complaint now.
+        $staffId = $author['role'] === 'student' ? (int)($complaint['assigned_to'] ?? 0) : (int)$userId;
+
+        $sql = "INSERT INTO complaint_comments (complaint_id, user_id, staff_id, comment_text) 
+                VALUES (:complaint_id, :user_id, :staff_id, :comment_text)";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
             ':complaint_id' => $complaintId,
             ':user_id' => $userId,
+            ':staff_id' => $staffId ?: null,
             ':comment_text' => $comment
         ]);
 
-        $complaint = $this->getComplaintById($complaintId);
         if ($complaint && (int)$complaint['complainant_id'] !== (int)$userId) {
             $preview = strlen($comment) > 120 ? substr($comment, 0, 117) . '...' : $comment;
             $this->notifyComplainant(
                 (int)$complaintId,
-                'New comment on your complaint',
+                'New chat message on your complaint',
                 'Complaint #' . $complaintId . ': ' . $preview,
                 (int)$userId
             );
+        }
+        // The staff member holding the complaint hears about the student's replies
+        // (and about comments from other staff) through the bell too.
+        if ($complaint && !empty($complaint['assigned_to'])) {
+            $preview = strlen($comment) > 120 ? substr($comment, 0, 117) . '...' : $comment;
+            try {
+                foreach ($this->staffToNotify((int)$complaint['assigned_to'], $complaint['current_level'] ?? null, (int)$userId) as $recipient) {
+                    (new Notification())->create($recipient, (int)$complaintId,
+                        'New chat message on complaint #' . $complaintId, $preview);
+                }
+            } catch (PDOException $e) {
+                // Notifications must not block comments.
+            }
         }
 
         return ['success' => true];
     }
     
-    public function getComments($complaintId) {
+    /**
+     * Comments are private conversations between the student and ONE staff
+     * member (complaint_comments.staff_id):
+     *  - the student sees all their conversations;
+     *  - a staff member sees only their own (OSWD admins share the office's);
+     *  - with no viewer given (Super Admin oversight), everything.
+     */
+    public function getComments($complaintId, $viewerId = null, $viewerRole = null) {
         // Students appear by alias in comments too, so staff cannot learn the name here.
-        $sql = "SELECT c.*, " . self::DISPLAY_NAME_SQL . " AS full_name, u.role FROM complaint_comments c
+        $sql = "SELECT c.*, " . self::DISPLAY_NAME_SQL . " AS full_name, u.role,
+                       s.full_name AS thread_with_name, s.role AS thread_with_role
+                FROM complaint_comments c
                 INNER JOIN users u ON c.user_id = u.user_id
-                WHERE c.complaint_id = :complaint_id ORDER BY c.created_at ASC";
+                LEFT JOIN users s ON c.staff_id = s.user_id
+                WHERE c.complaint_id = :complaint_id";
+        $params = [':complaint_id' => $complaintId];
+        if ($viewerRole !== null && $viewerRole !== 'student' && $viewerRole !== 'super_admin') {
+            if (in_array($viewerRole, officeRoles(), true)) {
+                // Shared office: all its accounts read the office's conversation.
+                $sql .= " AND s.role = :office";
+                $params[':office'] = $viewerRole;
+            } else {
+                $sql .= " AND c.staff_id = :viewer";
+                $params[':viewer'] = (int)$viewerId;
+            }
+        }
+        $sql .= " ORDER BY c.created_at ASC, c.comment_id ASC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([':complaint_id' => $complaintId]);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
     
@@ -274,14 +400,14 @@ class Complaint {
         }
 
         try {
-            if (!$this->resolveRoute($nextLevel, $complaint['department'] ?? null)) {
+            if (!$this->resolveRoute($nextLevel, $complaint['department'] ?? null, $complaint['program'] ?? null)) {
                 return ['success' => false, 'message' => 'No active staff account is available at the next level'];
             }
 
             $this->db->beginTransaction();
 
             // Forward within the complaint's department (see resolveRoute).
-            $route = $this->assignToRole($complaintId, $nextLevel, $escalatedBy, false, $complaint['department'] ?? null);
+            $route = $this->assignToRole($complaintId, $nextLevel, $escalatedBy, false, $complaint['department'] ?? null, $complaint['program'] ?? null);
 
             $sql = "INSERT INTO complaint_escalations (complaint_id, escalated_by, escalated_to, escalation_reason)
                     VALUES (:complaint_id, :escalated_by, :escalated_to, :reason)";
@@ -293,13 +419,16 @@ class Complaint {
                 ':reason' => $reason
             ]);
 
-            $this->updateStatus($complaintId, 'under_review', $escalatedBy, false);
+            // The next office starts fresh: the case is Pending again for them,
+            // just like a new case for the Program Coordinator.
+            $this->db->prepare("UPDATE complaints SET status = 'pending' WHERE complaint_id = :id")
+                ->execute([':id' => $complaintId]);
             $label = roleLabel($route['level']);
             $this->addTimeline(
                 $complaintId,
                 $escalatedBy,
                 'escalated',
-                "Escalated to {$label}" . $this->skippedNote($route, $complaint['department'] ?? null) . ": {$reason}"
+                "Escalated to {$label}" . $this->skippedNote($route, $complaint['department'] ?? null) . " — status back to Pending: {$reason}"
             );
 
             $this->db->commit();
@@ -321,7 +450,7 @@ class Complaint {
     /* ------------------------------------------------------------------
      * DEPARTMENT-BASED ROUTING
      *
-     * Program Coordinator and Program Chairperson belong to ONE department,
+     * Program Coordinator and Department Chairperson belong to ONE department,
      * so a complaint goes to the one in the complainant's department.
      * Guidance and OSWD serve the whole campus.
      *
@@ -341,8 +470,19 @@ class Complaint {
         return in_array($department, departments(), true) ? $department : null;
     }
 
-    /** One active staff member for a level (and department, where it applies). */
-    private function findActiveUserForWorkflowLevel($level, $department = null) {
+    /** The complainant's program in its official spelling (see canonicalProgram), or null. */
+    private function complainantProgram($userId, $department) {
+        $stmt = $this->db->prepare('SELECT program FROM users WHERE user_id = :id');
+        $stmt->execute([':id' => (int)$userId]);
+        return canonicalProgram($department, $stmt->fetchColumn());
+    }
+
+    /**
+     * One staff member at a level who can CURRENTLY handle complaints:
+     * active and not archived. Matches the complaint's department, and for
+     * the Program Coordinator also its program.
+     */
+    private function findActiveUserForWorkflowLevel($level, $department = null, $program = null) {
         if (!in_array($level, departmentRoles(), true)) {
             // Campus-wide level: first active account of that role.
             $stmt = $this->db->prepare(
@@ -350,6 +490,51 @@ class Complaint {
             );
             $stmt->execute([':role' => $level]);
             return $stmt->fetch() ?: null;
+        }
+
+        // DEPARTMENT CHAIRPERSON: one per department (program is not used).
+        // PROGRAM COORDINATOR: the one of the student's own program. Order: same department + same program → same department
+        // with no program set (covers the whole department) → campus-wide backup.
+        // Staff of a DIFFERENT program are never chosen.
+        // A student with no recognised program goes to a department-wide or
+        // campus-wide one; any of the department only as a last resort.
+        // (The Super Admin account form prevents two active staff covering the
+        // same level + department + program, so the choice is never ambiguous.)
+        if (in_array($level, departmentRoles(), true)) {
+            $stmt = $this->db->prepare(
+                "SELECT user_id, full_name, department, program FROM users
+                 WHERE role = :role AND status = 'active'
+                   AND (department = :d1 OR department IS NULL OR department = '')
+                 ORDER BY (department = :d2) DESC, user_id ASC"
+            );
+            $stmt->execute([':role' => $level, ':d1' => (string)$department, ':d2' => (string)$department]);
+            // Coordinators type their program too, so compare the official
+            // spelling ("IT" and "Information Technology" are the same program).
+            $exact = $wholeDepartment = $anyInDepartment = null;
+            $byProgram = in_array($level, programRoles(), true);
+            if (!$byProgram) {
+                $program = null;
+            }
+            if ($program && $department) {
+                $program = canonicalProgram($department, $program) ?? $program;
+            }
+            foreach ($stmt->fetchAll() as $c) {
+                $theirProgram = $byProgram ? trim((string)($c['program'] ?? '')) : '';
+                $sameDepartment = $department !== null && $c['department'] === $department;
+                if ($program && $sameDepartment && $theirProgram !== ''
+                    && canonicalProgram($department, $theirProgram) === $program) {
+                    $exact = $exact ?? $c;
+                } elseif ($theirProgram === '' || !$sameDepartment) {
+                    // No program = covers the whole department (or, with no
+                    // department, the whole campus).
+                    $wholeDepartment = $wholeDepartment ?? ($theirProgram === '' ? $c : null);
+                } elseif ($sameDepartment) {
+                    $anyInDepartment = $anyInDepartment ?? $c;
+                }
+            }
+            return $program
+                ? ($exact ?? $wholeDepartment)
+                : ($wholeDepartment ?? $anyInDepartment);
         }
 
         // Department level: same department first, then campus-wide backup.
@@ -368,10 +553,10 @@ class Complaint {
      * the chain past any level with nobody available.
      * Returns ['level' => ..., 'user' => [...], 'skipped' => [levels]] or null.
      */
-    private function resolveRoute($level, $department) {
+    private function resolveRoute($level, $department, $program = null) {
         $skipped = [];
         while ($level !== null) {
-            $user = $this->findActiveUserForWorkflowLevel($level, $department);
+            $user = $this->findActiveUserForWorkflowLevel($level, $department, $program);
             if ($user) {
                 return ['level' => $level, 'user' => $user, 'skipped' => $skipped];
             }
@@ -391,10 +576,25 @@ class Complaint {
     }
 
     /** Assign the complaint to the resolved person and level. Returns the route. */
-    private function assignToRole($complaintId, $level, $actionBy, $isInitial, $department = null) {
-        $route = $this->resolveRoute($level, $department);
+    private function assignToRole($complaintId, $level, $actionBy, $isInitial, $department = null, $program = null) {
+        $route = $this->resolveRoute($level, $department, $program);
         if (!$route) {
             throw new PDOException('No assignee for workflow level: ' . $level);
+        }
+
+        // Conflict of interest: a Program Coordinator or Department Chairperson
+        // named by the student as the person involved never receives the
+        // complaint; it moves up to the next level (on submit and on escalation).
+        $named = (string)($this->db->query('SELECT respondent_name FROM complaints WHERE complaint_id = ' . (int)$complaintId)->fetchColumn() ?: '');
+        while ($named !== '' && in_array($route['level'], departmentRoles(), true)
+               && $this->namesStaff($named, (int)$route['user']['user_id'])) {
+            $this->addTimeline($complaintId, $actionBy, 'assigned',
+                roleLabel($route['level']) . ' skipped: the complaint names them as the person involved');
+            $next = nextWorkflowLevel($route['level']);
+            $route = $next ? $this->resolveRoute($next, $department, $program) : null;
+            if (!$route) {
+                throw new PDOException('No assignee after skipping the named staff member');
+            }
         }
 
         $sql = "UPDATE complaints SET assigned_to = :assigned_to, current_level = :current_level WHERE complaint_id = :complaint_id";
@@ -405,9 +605,15 @@ class Complaint {
             ':complaint_id' => $complaintId
         ]);
 
+        // Tell the staff member who now holds the complaint (navbar bell).
+        $this->notifyStaff((int)$route['user']['user_id'], (int)$complaintId, $isInitial, $route['level']);
+
         if ($isInitial) {
             $label = roleLabel($route['level']);
             $where = $department && in_array($route['level'], departmentRoles(), true) ? " — {$department}" : '';
+            if ($where !== '' && $program) {
+                $where .= " · {$program}";
+            }
             $this->addTimeline(
                 $complaintId,
                 $actionBy,
@@ -418,6 +624,30 @@ class Complaint {
         return $route;
     }
     
+    /** Notify the staff member a complaint was routed or escalated to. Never blocks the workflow. */
+    private function notifyStaff($staffId, $complaintId, $isInitial, $level = null) {
+        try {
+            foreach ($this->staffToNotify($staffId, $level) as $recipient) {
+                (new Notification())->create($recipient, $complaintId,
+                    $isInitial ? 'New complaint assigned to you' : 'Complaint escalated to you',
+                    'Complaint #' . $complaintId . ($isInitial ? ' was routed to you.' : ' was escalated to you for review.'));
+            }
+        } catch (PDOException $e) {
+            // Notifications must not block complaint workflow.
+        }
+    }
+
+    /** The holder, or every active account of a shared office (Guidance / OSWD). */
+    private function staffToNotify($staffId, $level, $exceptUserId = 0) {
+        $ids = [(int)$staffId];
+        if ($level !== null && in_array($level, officeRoles(), true)) {
+            $stmt = $this->db->prepare("SELECT user_id FROM users WHERE role = :r AND status = 'active'");
+            $stmt->execute([':r' => $level]);
+            $ids = array_merge($ids, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
+        return array_values(array_diff(array_unique(array_filter($ids)), [(int)$exceptUserId]));
+    }
+
     private function notifyComplainant($complaintId, $title, $message, $actorUserId = null) {
         if (!class_exists('Notification')) {
             return;
@@ -475,5 +705,3 @@ class Complaint {
         return $stats;
     }
 }
-?>
-

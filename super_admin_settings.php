@@ -52,7 +52,9 @@ function settingFieldValue($key, array $formErrors) {
     if ($formErrors) {
         return !empty($_POST[$key]);
     }
-    return Settings::get($key);
+    $value = Settings::get($key);
+    return is_array($value) ? implode("
+", $value) : $value;   // program lists: one per line
 }
 
 $pageTitle = 'Settings';
@@ -79,7 +81,7 @@ include 'includes/super_admin_top.php';
     <div class="row g-4">
         <?php foreach (Settings::GROUPS as $group => [$groupLabel, $groupIcon]): ?>
             <div class="col-xl-6">
-                <div class="card nemsu-panel h-100">
+                <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel h-100">
                     <div class="card-header"><i class="bi bi-<?php echo $groupIcon; ?> me-2" aria-hidden="true"></i><?php echo $groupLabel; ?></div>
                     <div class="card-body">
                         <?php foreach (Settings::DEFINITIONS as $key => $def): ?>
@@ -93,7 +95,9 @@ include 'includes/super_admin_top.php';
                                     </div>
                                 <?php else: ?>
                                     <label class="form-label fw-semibold" for="<?php echo $key; ?>"><?php echo htmlspecialchars($def['label']); ?></label>
-                                    <?php if ($def['type'] === 'int'): ?>
+                                    <?php if ($def['type'] === 'lines'): ?>
+                                        <textarea class="form-control" id="<?php echo $key; ?>" name="<?php echo $key; ?>" rows="3" required><?php echo htmlspecialchars((string)$value); ?></textarea>
+                                    <?php elseif ($def['type'] === 'int'): ?>
                                         <div class="input-group" style="max-width: 300px">
                                             <input type="number" class="form-control" id="<?php echo $key; ?>" name="<?php echo $key; ?>"
                                                    min="<?php echo $def['min']; ?>" max="<?php echo $def['max']; ?>" step="1" required
@@ -123,7 +127,7 @@ include 'includes/super_admin_top.php';
 </form>
 
 <!-- Email (SMTP): status + test. Credentials stay in config/smtp.php, not the database. -->
-<div class="card nemsu-panel mb-4">
+<div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mb-4">
     <div class="card-header"><i class="bi bi-envelope me-2" aria-hidden="true"></i>Email (SMTP)</div>
     <div class="card-body">
         <?php if ($testEmailResult): ?>

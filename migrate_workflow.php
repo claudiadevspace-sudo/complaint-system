@@ -1,4 +1,9 @@
 <?php
+// Command line only (php migrate_workflow.php): never run from a browser.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 require_once __DIR__ . '/config/database.php';
 
 $db = Database::getInstance()->getConnection();
@@ -37,7 +42,7 @@ $accounts = [
         'username' => 'chairperson',
         'email' => 'chairperson@nemsu.edu',
         'password' => '$2y$10$gzEwzSOrzUK/hGI18GRLketjF7ST2F3nOw/xTxvtiP4UWzCRswHam',
-        'full_name' => 'Program Chairperson',
+        'full_name' => 'Department Chairperson',
         'role' => 'department_chair'
     ],
     [

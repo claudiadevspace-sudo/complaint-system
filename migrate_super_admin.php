@@ -1,4 +1,9 @@
 <?php
+// Command line only (php migrate_super_admin.php): never run from a browser.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 /**
  * Migration: Super Admin role, student aliases, and the audit log.
  *

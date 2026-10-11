@@ -4,5 +4,7 @@ ml_model/models/
 __pycache__/
 .env
 config/smtp.php
-.htaccess
+# .htaccess files are NOT ignored: they block web access to backups/,
+# uploads/, config/, migrations and other private files, so they must ship.
 backups/
+*cookies*.txt

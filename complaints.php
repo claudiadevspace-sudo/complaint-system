@@ -9,6 +9,7 @@ if (!empty($_GET['status']) && in_array($_GET['status'], allowedComplaintStatuse
     $filters['status'] = $_GET['status'];
 }
 $complaints = $complaint->getAllComplaints($filters);
+sortComplaintsBySeverity($complaints);   // Severity 1 first
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -44,7 +45,7 @@ $complaints = $complaint->getAllComplaints($filters);
                 </div>
             </form>
 
-            <div class="card nemsu-panel">
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
                 <div class="card-body p-0">
                     <?php if (empty($complaints)): ?>
                         <?php echo renderEmptyState('folder2-open', 'No complaints found', 'Try changing the status filter or check back later.'); ?>

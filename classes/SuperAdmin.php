@@ -194,8 +194,10 @@ class SuperAdmin {
         }
         // Status filter matches what the list shows (see userPresence()):
         // active = signed in recently, inactive = logged out/idle, deactivated = account off.
-        if (($f['status'] ?? '') === 'deactivated') {
-            $where[] = "status = 'inactive'";
+        if (($f['status'] ?? '') === 'archived') {
+            $where[] = 'archived_at IS NOT NULL';
+        } elseif (($f['status'] ?? '') === 'deactivated') {
+            $where[] = "status = 'inactive' AND archived_at IS NULL";
         } elseif (($f['status'] ?? '') === 'active') {
             $where[] = "status = 'active' AND " . USER_RECENTLY_ACTIVE_SQL;
         } elseif (($f['status'] ?? '') === 'inactive') {
@@ -213,7 +215,7 @@ class SuperAdmin {
         }
         $stmt = $this->db->prepare(
             'SELECT user_id, username, email, full_name, alias, role, student_id, department, program,
-                    contact_number, status, last_activity_at, ' . USER_RECENTLY_ACTIVE_SQL . ' AS recently_active, created_at
+                    contact_number, status, archived_at, last_activity_at, ' . USER_RECENTLY_ACTIVE_SQL . ' AS recently_active, created_at
              FROM users ' . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY role, full_name'
         );
         $stmt->execute($params);
@@ -235,10 +237,19 @@ class SuperAdmin {
     }
 
     /** Validate the create/edit form. Returns a list of error messages. */
-    private function validateUser(array $d, $existingId = null) {
+    /** $d is by reference: the program is rewritten to its official spelling. */
+    private function validateUser(array &$d, $existingId = null) {
         $errors = [];
-        if (!preg_match('/^[A-Za-z0-9._-]{3,50}$/', $d['username'])) {
-            $errors[] = 'Username must be 3-50 letters, numbers, dots, underscores or hyphens.';
+        // Username: at least 10 characters (any characters). Checked when creating
+        // or renaming, so older, shorter usernames can still be edited.
+        $currentUsername = $existingId ? (string)($this->getUser($existingId)['username'] ?? '') : null;
+        if ($d['username'] !== $currentUsername) {
+            $length = mb_strlen($d['username']);
+            if ($length < 10) {
+                $errors[] = 'Username must be at least 10 characters.';
+            } elseif ($length > 100) {
+                $errors[] = 'Username must be 100 characters or fewer.';
+            }
         }
         if (!filter_var($d['email'], FILTER_VALIDATE_EMAIL)) {
             $errors[] = 'Enter a valid email address.';
@@ -249,6 +260,19 @@ class SuperAdmin {
         if (!in_array($d['role'], allRoles(), true)) {
             $errors[] = 'Choose a valid role.';
         }
+        // New accounts are staff only. An existing student / Super Admin can
+        // still be edited, but nobody can be switched INTO those roles.
+        $current = $existingId ? $this->getUser($existingId) : null;
+        if (!in_array($d['role'], staffAccountRoles(), true) && (!$current || $current['role'] !== $d['role'])) {
+            $errors[] = 'Choose Program Coordinator, Department Chairperson, Guidance Counselor or OSWD Admin.';
+        }
+        // Student ID is not on the form: keep what is stored.
+        $d['student_id'] = (string)($current['student_id'] ?? '');
+        // Only coordinators (and students) have a program. Department Chairs,
+        // Guidance and OSWD are assigned to a department only.
+        if (!in_array($d['role'], programRoles(), true)) {
+            $d['program'] = '';
+        }
         // Department must come from the fixed list, and is required for
         // roles that belong to a single department (coordinator, chairperson).
         if ($d['department'] !== '' && !in_array($d['department'], departments(), true)) {
@@ -256,6 +280,34 @@ class SuperAdmin {
         }
         if ($d['department'] === '' && in_array($d['role'], departmentRoles(), true)) {
             $errors[] = 'A ' . roleLabel($d['role']) . ' must be assigned to a department.';
+        }
+        // Program: optional, but if given it must be one of the department's
+        // official programs (Settings → Programs). A coordinator's program
+        // decides which students' complaints they receive.
+        if ($d['program'] !== '') {
+            $official = canonicalProgram($d['department'], $d['program']);
+            if ($official === null) {
+                $errors[] = $d['department'] === ''
+                    ? 'Choose a department before choosing a program.'
+                    : 'Choose a program that belongs to ' . $d['department'] . '.';
+            } else {
+                $d['program'] = $official;
+            }
+        }
+        // Only ONE active coordinator (or chairperson) per department + program.
+        // With two, routing could only ever pick one of them and the other
+        // would never receive complaints.
+        if (in_array($d['role'], departmentRoles(), true) && $d['department'] !== '') {
+            $existing = $existingId ? $this->getUser($existingId) : null;
+            if (!$existing || $existing['status'] === 'active') {
+                $taken = $this->coverageConflict($d['role'], $d['department'], $d['program'], $existingId);
+                if ($taken) {
+                    $errors[] = $taken . ' already handles ' . $d['department'] . ' · '
+                        . ($d['program'] !== '' ? $d['program'] : 'the whole department')
+                        . ' as ' . roleLabel($d['role']) . '. '
+                        . ($d['role'] === 'program_coordinator' ? 'Choose another program, or deactivate that account first.' : 'Deactivate that account first.');
+                }
+            }
         }
         // Username and email must stay unique.
         $dup = $this->db->prepare(
@@ -369,6 +421,29 @@ class SuperAdmin {
     }
 
     /** Activate or deactivate. Inactive users cannot sign in (LoginAuth only accepts 'active'). */
+    /**
+     * Another ACTIVE coordinator/chairperson covering the same department and
+     * program (no program = the whole department)? Returns their username or null.
+     * Programs are compared in their official spelling ("IT" = "BS Information Technology").
+     */
+    private function coverageConflict($role, $department, $program, $excludeId = null) {
+        $stmt = $this->db->prepare(
+            "SELECT user_id, username, program FROM users
+             WHERE role = :role AND department = :d AND status = 'active' AND archived_at IS NULL AND user_id <> :id"
+        );
+        $stmt->execute([':role' => $role, ':d' => $department, ':id' => (int)$excludeId]);
+        // Only coordinators are split by program; a Department Chair covers the whole department.
+        $byProgram = in_array($role, programRoles(), true);
+        $wanted = !$byProgram || (string)$program === '' ? '' : (canonicalProgram($department, $program) ?? $program);
+        foreach ($stmt->fetchAll() as $other) {
+            $theirs = !$byProgram || trim((string)$other['program']) === '' ? '' : (canonicalProgram($department, $other['program']) ?? $other['program']);
+            if ($theirs === $wanted) {
+                return $other['username'];
+            }
+        }
+        return null;
+    }
+
     public function setStatus($userId, $status) {
         $user = $this->getUser($userId);
         if (!$user || !in_array($status, ['active', 'inactive'], true)) {
@@ -383,8 +458,17 @@ class SuperAdmin {
                 return ['success' => false, 'message' => $lastError];
             }
         }
+        // Reactivating must not create two active staff for the same department + program.
+        if ($status === 'active' && in_array($user['role'], departmentRoles(), true) && !empty($user['department'])) {
+            $taken = $this->coverageConflict($user['role'], $user['department'], (string)$user['program'], (int)$userId);
+            if ($taken) {
+                return ['success' => false, 'message' => 'Cannot reactivate: ' . $taken . ' already handles ' . $user['department']
+                    . ' · ' . (in_array($user['role'], programRoles(), true) && $user['program'] ? $user['program'] : 'the whole department') . ' as ' . roleLabel($user['role']) . '.'];
+            }
+        }
 
-        $this->db->prepare('UPDATE users SET status = :status WHERE user_id = :id')
+        // Reactivating an archived account also takes it out of the archive.
+        $this->db->prepare('UPDATE users SET status = :status' . ($status === 'active' ? ', archived_at = NULL, archived_by = NULL' : '') . ' WHERE user_id = :id')
             ->execute([':status' => $status, ':id' => (int)$userId]);
         $this->audit->record($status === 'active' ? 'user_reactivate' : 'user_deactivate',
             'user', (int)$userId, $user['username'], null, ['role' => $user['role']]);
@@ -580,7 +664,7 @@ class SuperAdmin {
             $summary['by_category'][$cat] = ($summary['by_category'][$cat] ?? 0) + 1;
             $lvl = workflowLevelLabel($r['current_level']);
             $summary['by_level'][$lvl] = ($summary['by_level'][$lvl] ?? 0) + 1;
-            $sev = ucfirst((string)$r['severity']);
+            $sev = severityMeta($r['severity'])['long'];
             $summary['by_severity'][$sev] = ($summary['by_severity'][$sev] ?? 0) + 1;
             $dept = $r['department'] ?: 'No department';
             $summary['by_department'][$dept] = ($summary['by_department'][$dept] ?? 0) + 1;

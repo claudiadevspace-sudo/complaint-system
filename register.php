@@ -34,7 +34,8 @@ if (isset($_POST['verify_student_id'])) {
     if (!verifyCsrf()) {
         $_SESSION['message'] = 'Invalid request. Please try again.';
         $_SESSION['message_type'] = 'danger';
-    } elseif ($window['count'] >= 10) {
+    } elseif ($window['count'] >= 10 || rateLimitExceeded('register_id_check', clientIp(), 30, 900)) {
+        // Per browser session AND per IP on the server (clearing cookies does not reset it).
         $_SESSION['message'] = 'Too many Student ID checks. Please wait 15 minutes and try again, or contact OSWD.';
         $_SESSION['message_type'] = 'danger';
     } else {
@@ -42,7 +43,7 @@ if (isset($_POST['verify_student_id'])) {
         $check = $enrollment->verifyForRegistration($_POST['student_id'] ?? '');
         if ($check['ok']) {
             $_SESSION['registration_student_id'] = $check['record']['student_id'];
-            $_SESSION['message'] = 'Student ID verified. Complete your account details below.';
+            $_SESSION['message'] = 'Student ID verified. Check your details and create a password.';
             $_SESSION['message_type'] = 'success';
         } else {
             $_SESSION['message'] = $check['message'];
@@ -67,16 +68,13 @@ if (isset($_POST['register']) && !$verifiedId) {
         $_SESSION['message'] = 'Passwords do not match.';
         $_SESSION['message_type'] = 'danger';
     } else {
+        // Only the password comes from the form. Name, department, program,
+        // email and contact number are taken from OSWD's enrolled record by
+        // User::register(); the username is the Student ID.
         $data = [
-            'username' => sanitizeInput($_POST['username'] ?? ''),
-            'email' => sanitizeInput($_POST['email'] ?? ''),
             'password' => $_POST['password'] ?? '',
-            'full_name' => sanitizeInput($_POST['full_name'] ?? ''),
             'role' => 'student',
             'student_id' => $verifiedId,   // from step 1, not from the form
-            'department' => sanitizeInput($_POST['department'] ?? ''),
-            'program' => sanitizeInput($_POST['program'] ?? ''),
-            'contact_number' => sanitizeInput($_POST['contact_number'] ?? ''),
         ];
 
         $user = new User();
@@ -104,10 +102,6 @@ if ($verifiedId) {
         $_SESSION['message_type'] = 'danger';
     }
 }
-/** Value to show in a step-2 field: what was typed, else the enrolled list's value. */
-$fieldValue = function ($field) use ($enrolledRecord) {
-    return htmlspecialchars((string)($_POST[$field] ?? ($enrolledRecord[$field] ?? '')), ENT_QUOTES, 'UTF-8');
-};
 
 $authMessage = $_SESSION['message'] ?? null;
 $authMessageType = $_SESSION['message_type'] ?? 'info';
@@ -130,7 +124,7 @@ if ($authMessage !== null) {
                 <h2 class="h4 mb-2">Student registration</h2>
                 <p class="text-muted small mb-3">
                     <?php echo $verifiedId
-                        ? 'Step 2 of 2 — create your account. Use a valid email address: sign-in verification codes are sent there.'
+                        ? 'Step 2 of 2 — your details come from your enrolled record. Just create a password.'
                         : 'Step 1 of 2 — verify that you are an enrolled student.'; ?>
                 </p>
                 <div class="progress mb-4" style="height: 4px" role="progressbar" aria-label="Registration progress"
@@ -178,49 +172,33 @@ if ($authMessage !== null) {
                             </div>
                             <div class="form-text">Verified against the enrolled students list.</div>
                         </div>
-                        <div class="col-md-6">
-                            <label for="full_name" class="form-label">Full name *</label>
-                            <input type="text" class="form-control" id="full_name" name="full_name" required autocomplete="name" value="<?php echo $fieldValue('full_name'); ?>">
-                        </div>
-                        <div class="col-md-6">
-                            <label for="username" class="form-label">Username *</label>
-                            <input type="text" class="form-control" id="username" name="username" minlength="3" maxlength="50" required autocomplete="username" value="<?php echo $fieldValue('username'); ?>">
-                        </div>
-                        <div class="col-md-6">
-                            <label for="email" class="form-label">Email *</label>
-                            <input type="email" class="form-control" id="email" name="email" required autocomplete="email" value="<?php echo $fieldValue('email'); ?>">
-                        </div>
-                        <div class="col-md-6">
-                            <label for="department" class="form-label">Department *</label>
-                            <?php if (!empty($enrolledRecord['department'])): ?>
-                                <!-- Department comes from OSWD's list and cannot be changed here -->
-                                <input type="text" class="form-control" id="department" value="<?php echo htmlspecialchars($enrolledRecord['department']); ?>" readonly>
-                                <input type="hidden" name="department" value="<?php echo htmlspecialchars($enrolledRecord['department']); ?>">
-                            <?php else: ?>
-                                <!-- Fixed list: complaints are routed to this department's personnel -->
-                                <select class="form-select" id="department" name="department" required>
-                                    <option value="">Choose your department</option>
-                                    <?php foreach (departments() as $dept): ?>
-                                        <option value="<?php echo $dept; ?>" <?php echo ($_POST['department'] ?? '') === $dept ? 'selected' : ''; ?>><?php echo $dept; ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            <?php endif; ?>
-                        </div>
-                        <div class="col-md-6">
-                            <label for="program" class="form-label">Program</label>
-                            <input type="text" class="form-control" id="program" name="program" value="<?php echo $fieldValue('program'); ?>">
-                        </div>
-                        <div class="col-md-6">
-                            <label for="contact_number" class="form-label">Contact number</label>
-                            <input type="tel" class="form-control" id="contact_number" name="contact_number" autocomplete="tel" value="<?php echo $fieldValue('contact_number'); ?>">
+                        <!-- Details from OSWD's enrolled record: shown, never editable. -->
+                        <div class="col-12">
+                            <div class="nemsu-enrolled-summary">
+                                <p class="small text-muted mb-2"><i class="bi bi-lock me-1" aria-hidden="true"></i>From your enrolled record. These cannot be changed here; if something is wrong, contact OSWD.</p>
+                                <dl class="row small mb-0">
+                                    <dt class="col-sm-4">Full name</dt>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars($enrolledRecord['full_name'] ?? ''); ?></dd>
+                                    <dt class="col-sm-4">Department</dt>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars($enrolledRecord['department'] ?? ''); ?></dd>
+                                    <dt class="col-sm-4">Program</dt>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars(canonicalProgram($enrolledRecord['department'] ?? '', $enrolledRecord['program'] ?? '') ?? ''); ?></dd>
+                                    <dt class="col-sm-4">Email</dt>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars($enrolledRecord['email'] ?? ''); ?> <span class="text-muted">(sign-in codes are sent here)</span></dd>
+                                    <dt class="col-sm-4">Contact number</dt>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars(($enrolledRecord['contact_number'] ?? '') ?: '—'); ?></dd>
+                                    <dt class="col-sm-4">Username</dt>
+                                    <dd class="col-sm-8 mb-0"><?php echo htmlspecialchars($verifiedId); ?> <span class="text-muted">(your Student ID)</span></dd>
+                                </dl>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label for="password" class="form-label">Password *</label>
                             <div class="input-group">
-                                <input type="password" class="form-control" id="password" name="password" minlength="6" required autocomplete="new-password">
+                                <input type="password" class="form-control" id="password" name="password" minlength="12" required autocomplete="new-password">
                                 <button type="button" class="btn btn-outline-secondary" data-toggle-password="password" aria-label="Show password"><i class="bi bi-eye" aria-hidden="true"></i></button>
                             </div>
-                            <div class="form-text">At least 6 characters</div>
+                            <div class="form-text">At least 12 characters with upper and lower case, a number and a symbol.</div>
                         </div>
                         <div class="col-md-6">
                             <label for="confirm_password" class="form-label">Confirm password *</label>
