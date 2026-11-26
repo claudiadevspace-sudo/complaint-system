@@ -2,13 +2,13 @@
     'use strict';
 
     /*
-     * Light / dark mode switch in the navbar (dashboards only).
+     * Light / dark mode switch: in the top bar (dashboards) and in the corner
+     * of the sign-in pages.
      *
      * The mode is saved in the 'nemsu_theme' cookie and the page reloads, so
      * PHP renders it in the chosen mode (see appTheme() in config.php). Doing
      * it on the server means pages never flash the wrong colours while
-     * loading, and the sign-in pages are never affected: appTheme() only
-     * applies the cookie while someone is signed in.
+     * loading.
      */
     var COOKIE = 'nemsu_theme';
 
@@ -20,7 +20,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         var btn = document.getElementById('themeToggle');
         if (!btn) {
-            return;   // sign-in / registration pages have no toggle
+            return;
         }
         btn.addEventListener('click', function () {
             var next = btn.getAttribute('data-current-theme') === 'dark' ? 'light' : 'dark';

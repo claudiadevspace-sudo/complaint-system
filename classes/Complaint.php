@@ -175,11 +175,15 @@ class Complaint {
                 INNER JOIN users u ON c.complainant_id = u.user_id
                 LEFT JOIN users a ON c.assigned_to = a.user_id
                 WHERE c.assigned_to = :user_id
-                   OR (:office <> '' AND c.current_level = :office2)
+                   " . ($office ? 'OR c.current_level = :office' : '') . "
                    OR EXISTS (SELECT 1 FROM complaint_escalations e WHERE e.complaint_id = c.complaint_id AND e.escalated_by = :handler)
                 ORDER BY c.created_at DESC";
+        $params = [':user_id' => $userId, ':handler' => $userId];
+        if ($office) {
+            $params[':office'] = $office;
+        }
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([':user_id' => $userId, ':handler' => $userId, ':office' => (string)$office, ':office2' => (string)$office]);
+        $stmt->execute($params);
         // Escalated onward by this user: still listed, but view only.
         $rows = $stmt->fetchAll();
         foreach ($rows as &$row) {

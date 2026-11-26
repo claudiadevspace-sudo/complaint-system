@@ -24,6 +24,26 @@ if (isset($_GET['template'])) {
     exit;
 }
 
+// ---- Download a previously uploaded list (OSWD only, never a direct link) ----
+if (isset($_GET['download_upload'])) {
+    $upload = $enrollment->findUpload((int)$_GET['download_upload']);
+    if (!$upload || !is_file($upload['path'])) {
+        $_SESSION['message'] = 'That file is no longer available.';
+        $_SESSION['message_type'] = 'danger';
+        redirect('enrolled_students.php');
+    }
+    $types = ['csv' => 'text/csv', 'txt' => 'text/plain',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+    $ext = strtolower(pathinfo($upload['stored_name'], PATHINFO_EXTENSION));
+    (new AuditLog())->record('enrollment_file_download', 'enrollment', null, $upload['original_name']);
+    header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+    header('Content-Disposition: attachment; filename="' . str_replace(['"', "\r", "\n"], '', $upload['original_name']) . '"');
+    $content = Crypto::readFile($upload['path']);   // kept encrypted on the server
+    header('Content-Length: ' . strlen((string)$content));
+    echo $content;
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf()) {
         $_SESSION['message'] = 'Invalid request. Please try again.';
@@ -41,8 +61,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mode = ($_POST['mode'] ?? '') === 'replace' ? 'replace' : 'add';
         // No redirect on purpose: the import summary is shown on this response.
         $importResult = $enrollment->import($file['tmp_name'], $file['name'], $mode, (int)$_SESSION['user_id']);
+        if (!empty($importResult['success'])) {
+            // Keep the file so it stays listed under the upload form.
+            $enrollment->keepUpload($file['tmp_name'], $file['name'], $mode, $importResult, (int)$_SESSION['user_id']);
+        }
     } elseif (isset($_POST['add_one'])) {
         $result = $enrollment->addOne($_POST['student_id'] ?? '', $_POST['full_name'] ?? '', $_POST['department'] ?? '', (int)$_SESSION['user_id'], $_POST['one_program'] ?? '', $_POST['email'] ?? '', $_POST['contact_number'] ?? '');
+        $_SESSION['message'] = $result['message'];
+        $_SESSION['message_type'] = $result['success'] ? 'success' : 'danger';
+        redirect('enrolled_students.php');
+    } elseif (isset($_POST['delete_upload'])) {
+        $result = $enrollment->deleteUpload((int)($_POST['upload_id'] ?? 0));
         $_SESSION['message'] = $result['message'];
         $_SESSION['message_type'] = $result['success'] ? 'success' : 'danger';
         redirect('enrolled_students.php');
@@ -64,6 +93,7 @@ $perPage = 25;
 $list = $enrollment->search($filters, $page, $perPage);
 $totalPages = max(1, (int)ceil($list['total'] / $perPage));
 $stats = $enrollment->stats();
+$uploads = $enrollment->uploads();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -152,8 +182,8 @@ $stats = $enrollment->stats();
                             <label for="list_file" class="form-label">File (.csv, .xlsx or .txt, up to 10 MB)</label>
                             <input type="file" class="form-control" id="list_file" name="list_file" accept=".csv,.xlsx,.txt" required>
                             <div class="form-text mb-3">
-                                Use a column named <strong>Student ID</strong>, plus Full Name, Department, Program, <strong>Email</strong> and Contact Number.
-                                Students register with only their ID and a password, so an entry needs a name, department, program and email before that student can register.
+                                The campus <strong>Student Directory</strong> export works as is (IDNO, Full Name, Course, Department, Contact Number; the title rows above the headings are skipped). Other lists need a <strong>Student ID</strong> column, plus Full Name, Department, Program, Email and Contact Number.
+                                A student can register once their entry has a name, department and program; if it has no email, they type their own when registering.
                                 (One ID per line with no header also works, but those students cannot register until their details are added.) In Excel, format the ID column as <em>Text</em> so leading zeros are kept.
                             </div>
                             <div class="form-check">
@@ -174,6 +204,53 @@ $stats = $enrollment->stats();
                             </button>
                         </div>
                     </form>
+                </div>
+
+                <!-- Uploaded files: every list uploaded so far, newest first -->
+                <div class="col-12 order-lg-last">
+                    <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel">
+                        <div class="card-header"><i class="bi bi-folder2-open me-2" aria-hidden="true"></i>Uploaded files (<?php echo count($uploads); ?>)</div>
+                        <div class="card-body p-0">
+                            <?php if (!$uploads): ?>
+                                <p class="text-muted small p-3 mb-0">No files uploaded yet. Uploaded lists will appear here.</p>
+                            <?php else: ?>
+                                <div class="table-responsive">
+                                    <table class="table table-sm align-middle mb-0 nemsu-table nemsu-table--stack">
+                                        <thead>
+                                            <tr><th>File</th><th>Uploaded</th><th>By</th><th>Mode</th><th>Result</th><th class="text-end nemsu-stack-full"></th></tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($uploads as $up): ?>
+                                                <tr>
+                                                    <td>
+                                                        <i class="bi bi-file-earmark-<?php echo str_ends_with($up['stored_name'], '.xlsx') ? 'excel' : 'text'; ?> me-1" aria-hidden="true"></i>
+                                                        <span class="fw-semibold"><?php echo htmlspecialchars($up['original_name']); ?></span>
+                                                        <small class="text-muted d-block"><?php echo number_format($up['file_size'] / 1024, 0); ?> KB</small>
+                                                    </td>
+                                                    <td><small><?php echo date('M j, Y g:i A', strtotime($up['created_at'])); ?></small></td>
+                                                    <td><small><?php echo htmlspecialchars($up['uploaded_by_name'] ?? '—'); ?></small></td>
+                                                    <td><span class="badge <?php echo $up['mode'] === 'replace' ? 'bg-warning text-dark' : 'bg-secondary'; ?>"><?php echo $up['mode'] === 'replace' ? 'Replaced list' : 'Added'; ?></span></td>
+                                                    <td><small><?php echo number_format($up['students_in_file']); ?> students · <?php echo number_format($up['added']); ?> new · <?php echo number_format($up['updated']); ?> updated<?php echo $up['invalid'] ? ' · ' . number_format($up['invalid']) . ' invalid' : ''; ?></small></td>
+                                                    <td class="text-end text-nowrap">
+                                                        <a href="enrolled_students.php?download_upload=<?php echo (int)$up['upload_id']; ?>" class="btn btn-sm btn-outline-primary">
+                                                            <i class="bi bi-download me-1" aria-hidden="true"></i>Download
+                                                        </a>
+                                                        <form method="POST" class="d-inline" data-confirm-message="Delete the file &quot;<?php echo htmlspecialchars($up['original_name'], ENT_QUOTES); ?>&quot;? The enrolled list itself is not changed.">
+                                                            <?php echo csrfField(); ?>
+                                                            <input type="hidden" name="upload_id" value="<?php echo (int)$up['upload_id']; ?>">
+                                                            <button type="submit" name="delete_upload" value="1" class="btn btn-sm btn-outline-danger">
+                                                                <i class="bi bi-trash me-1" aria-hidden="true"></i>Delete
+                                                            </button>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Add one ID by hand -->
@@ -220,7 +297,7 @@ $stats = $enrollment->stats();
                                 <input type="tel" class="form-control form-control-sm" id="one_contact" name="contact_number" maxlength="20">
                             </div>
                             <div class="col-12">
-                                <div class="form-text">The student registers with only their ID and a password, so fill in the name, department, program and email.</div>
+                                <div class="form-text">The student registers with only their ID and a password, so fill in the name, department and program (and the email if you have it).</div>
                             </div>
                         </div>
                         <div class="card-footer bg-white d-flex justify-content-end">

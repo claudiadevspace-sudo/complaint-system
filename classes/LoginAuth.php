@@ -73,6 +73,7 @@ class LoginAuth {
 
         $features = $this->buildFeatures($user, $context);
         $risk = $this->assessRisk($features);
+        $risk['features'] = $features;
 
         if (LOGIN_RF_SHADOW_MODE) {
             $this->logEvent((int)$user['user_id'], $username, true, null, $context, $risk);
@@ -117,6 +118,11 @@ class LoginAuth {
         }
 
         $code = trim((string)$code);
+        $_SESSION['login_otp_attempts'] = (int)($_SESSION['login_otp_attempts'] ?? 0);
+        if ($_SESSION['login_otp_attempts'] >= LOGIN_OTP_MAX_ATTEMPTS) {
+            unset($_SESSION['pending_login_otp'], $_SESSION['login_otp_attempts']);
+            return ['success' => false, 'message' => 'Too many invalid codes. Please sign in again.'];
+        }
         if (!preg_match('/^\d{6}$/', $code)) {
             return ['success' => false, 'message' => 'Please enter the 6-digit verification code.'];
         }
@@ -135,6 +141,7 @@ class LoginAuth {
         $row = $stmt->fetch();
 
         if (!$row) {
+            $_SESSION['login_otp_attempts']++;
             return ['success' => false, 'message' => 'Invalid verification code.'];
         }
 
@@ -142,7 +149,7 @@ class LoginAuth {
         $update->execute([':id' => $row['otp_id']]);
 
         $user = $this->userService->getUserById((int)$pending['user_id']);
-        unset($_SESSION['pending_login_otp']);
+        unset($_SESSION['pending_login_otp'], $_SESSION['login_otp_attempts']);
 
         if (!$user) {
             return ['success' => false, 'message' => 'Account not found.'];
@@ -199,7 +206,7 @@ class LoginAuth {
             'window_start' => (int)$resend['window_start'],
         ];
 
-        return [
+        $features = [
             'success' => true,
             'message' => 'A new verification code was sent. Check your inbox and spam folder.',
         ];
@@ -212,10 +219,20 @@ class LoginAuth {
     }
 
     private function findActiveUser($username) {
-        $sql = "SELECT * FROM users WHERE (username = :username OR email = :email) AND status = 'active' LIMIT 1";
+        $sql = "SELECT * FROM users
+                WHERE (username = :username OR email = :email OR (role = 'student' AND student_id = :student_id))
+                  AND status = 'active'
+                ORDER BY (username = :username2) DESC LIMIT 1";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([':username' => $username, ':email' => $username]);
+        $stmt->execute([':username' => $username, ':email' => $username, ':username2' => $username,
+            ':student_id' => EnrollmentList::normalizeId($username)]);
         return $stmt->fetch() ?: null;
+    }
+
+    /** Sign the student in after the Super Admin approved the unlock and the emailed code was correct. */
+    public function signInAfterUnlock(array $user) {
+        $this->logEvent((int)$user['user_id'], $user['username'], true, 'unlock_code', $this->captureContext(), null);
+        $this->establishSession($user);
     }
 
     private function establishSession(array $user) {
@@ -299,6 +316,7 @@ class LoginAuth {
             'email' => $email,
             'expires_at' => time() + LOGIN_OTP_TTL,
         ];
+        $_SESSION['login_otp_attempts'] = 0;
 
         return [
             'email_sent' => true,
@@ -325,34 +343,54 @@ class LoginAuth {
         return $classifier->assess($features);
     }
 
+    /**
+     * The four clues the sign-in Random Forest uses: wrong passwords on this
+     * account and from this network address in the last 15 minutes, and
+     * whether the network address and the browser are new for this user.
+     */
     private function buildFeatures(array $user, array $context) {
         $userId = (int)$user['user_id'];
         $ipHash = $context['ip_hash'];
         $uaHash = $context['user_agent_hash'];
 
         return [
-            'hour' => (int)date('G'),
-            'day_of_week' => (int)date('w'),
-            'failed_attempts_user_15m' => $this->countRecentFailures('username_attempted', $user['username']),
+            'failed_attempts_user_15m' => $this->countRecentAccountFailures($user),
             'failed_attempts_ip_15m' => $this->countRecentFailures('ip_hash', $ipHash),
             'is_new_ip_for_user' => $this->isNewForUser($userId, 'ip_hash', $ipHash) ? 1 : 0,
             'is_new_user_agent' => $this->isNewForUser($userId, 'user_agent_hash', $uaHash) ? 1 : 0,
-            'account_age_days' => max(0, (int)floor((time() - strtotime($user['created_at'])) / 86400)),
-            'role_student' => ($user['role'] ?? '') === 'student' ? 1 : 0,
         ];
     }
 
+    /** Wrong passwords from one network address (any account), last 15 minutes. */
     private function countRecentFailures($field, $value) {
-        $allowed = ['username_attempted', 'ip_hash'];
-        if (!in_array($field, $allowed, true)) {
+        if ($field !== 'ip_hash') {
             return 0;
         }
-
         $sql = "SELECT COUNT(*) FROM login_events
-                WHERE {$field} = :value AND success = 0
+                WHERE ip_hash = :value AND failure_reason = 'invalid_credentials'
                 AND created_at >= (NOW() - INTERVAL 15 MINUTE)";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([':value' => $value]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Wrong passwords on this account, last 15 minutes, whether the person typed
+     * the Student ID, the email or the username (failed attempts on a known
+     * account are saved with its user_id).
+     */
+    private function countRecentAccountFailures(array $user) {
+        $sql = "SELECT COUNT(*) FROM login_events
+                WHERE failure_reason = 'invalid_credentials'
+                AND created_at >= (NOW() - INTERVAL 15 MINUTE)
+                AND (user_id = :id OR username_attempted IN (:username, :email, :student_id))";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            ':id' => (int)$user['user_id'],
+            ':username' => (string)$user['username'],
+            ':email' => (string)$user['email'],
+            ':student_id' => (string)($user['student_id'] ?? ''),
+        ]);
         return (int)$stmt->fetchColumn();
     }
 
@@ -381,9 +419,9 @@ class LoginAuth {
     private function logEvent($userId, $username, $success, $failureReason, array $context, $risk) {
         try {
             $sql = "INSERT INTO login_events (user_id, username_attempted, success, failure_reason,
-                    ip_hash, user_agent_hash, risk_score, risk_label, model_version)
+                    ip_hash, user_agent_hash, risk_score, risk_label, model_version, feature_json)
                     VALUES (:user_id, :username, :success, :failure_reason, :ip_hash, :ua_hash,
-                    :risk_score, :risk_label, :model_version)";
+                    :risk_score, :risk_label, :model_version, :feature_json)";
             $stmt = $this->db->prepare($sql);
             $stmt->execute([
                 ':user_id' => $userId,
@@ -395,6 +433,7 @@ class LoginAuth {
                 ':risk_score' => is_array($risk) ? ($risk['score'] ?? null) : null,
                 ':risk_label' => is_array($risk) ? ($risk['label'] ?? null) : null,
                 ':model_version' => is_array($risk) ? ($risk['model_version'] ?? null) : null,
+                ':feature_json' => is_array($risk) && isset($risk['features']) ? json_encode($risk['features']) : null,
             ]);
         } catch (PDOException $e) {
             // Logging must not block authentication.

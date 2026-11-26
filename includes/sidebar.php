@@ -2,7 +2,7 @@
 $role = $_SESSION['role'] ?? '';
 ?>
 <div class="col-auto px-0 nemsu-sidebar-col">
-    <div class="offcanvas-md offcanvas-start sidebar nemsu-sidebar" tabindex="-1" id="sidebarOffcanvas" data-bs-theme="dark"
+    <div class="offcanvas-md offcanvas-start sidebar nemsu-sidebar" tabindex="-1" id="sidebarOffcanvas" data-bs-theme="<?php echo appTheme(); ?>"
          aria-labelledby="sidebarOffcanvasLabel">
         <div class="offcanvas-header d-md-none border-bottom">
             <h2 class="offcanvas-title h6" id="sidebarOffcanvasLabel">Navigation</h2>
@@ -18,6 +18,7 @@ $role = $_SESSION['role'] ?? '';
                     'super_admin.php' => ['speedometer2', 'Overview'],
                     'super_admin_auth.php' => ['shield-lock', 'Authentication'],
                     'super_admin_users.php' => ['people', 'User management'],
+                    'super_admin_unlock_requests.php' => ['unlock', 'Unlock requests'],
                     'super_admin_reveal.php' => ['incognito', 'Identity reveal'],
                     'super_admin_complaints.php' => ['folder2-open', 'Complaints'],
                     'super_admin_audit.php' => ['journal-check', 'Audit log'],
@@ -26,6 +27,13 @@ $role = $_SESSION['role'] ?? '';
                     'super_admin_settings.php' => ['sliders', 'Settings'],
                 ];
                 $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
+                // Pending unlock requests, shown as a badge on the menu item.
+                $pendingUnlocks = 0;
+                try {
+                    $pendingUnlocks = (new AccountLockout())->getPendingCount();
+                } catch (Throwable $e) {
+                    $pendingUnlocks = 0;
+                }
                 ?>
                 <p class="sidebar-label">Super Admin</p>
                 <ul class="nav flex-column nemsu-sidebar__nav">
@@ -39,6 +47,9 @@ $role = $_SESSION['role'] ?? '';
                             <a class="nav-link<?php echo $active ? ' active' : ''; ?>" href="<?php echo $file; ?>">
                                 <i class="bi bi-<?php echo $icon; ?>" aria-hidden="true"></i>
                                 <span class="nemsu-sidebar__text"><?php echo $label; ?></span>
+                                <?php if ($file === 'super_admin_unlock_requests.php' && $pendingUnlocks > 0): ?>
+                                    <span class="badge rounded-pill bg-warning text-dark ms-auto" title="Pending unlock requests"><?php echo (int)$pendingUnlocks; ?></span>
+                                <?php endif; ?>
                             </a>
                         </li>
                     <?php endforeach; ?>

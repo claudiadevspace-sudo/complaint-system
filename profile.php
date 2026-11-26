@@ -57,6 +57,30 @@ if (isset($_POST['change_password'])) {
     }
 }
 
+// Change email (students): new email → "Send code" → enter the code.
+$emailChange = new EmailChange();
+$emailMessage = null;   // [type, text] shown inside the Change email card
+if ($isStudent && (isset($_POST['send_email_code']) || isset($_POST['verify_email_code']) || isset($_POST['cancel_email_change']))) {
+    if (!verifyCsrf()) {
+        $emailMessage = ['danger', 'Invalid request. Please try again.'];
+    } elseif (isset($_POST['cancel_email_change'])) {
+        $emailChange->cancel();
+        redirect('profile.php#change-email');
+    } elseif (isset($_POST['send_email_code'])) {
+        $result = $emailChange->sendCode($_SESSION['user_id'], $_POST['new_email'] ?? '');
+        $emailMessage = [$result['success'] ? 'info' : 'danger', $result['message']];
+    } else {
+        $result = $emailChange->verify($_SESSION['user_id'], $_POST['email_code'] ?? '');
+        if ($result['success']) {
+            $_SESSION['message'] = $result['message'];
+            $_SESSION['message_type'] = 'success';
+            redirect('profile.php#change-email');
+        }
+        $emailMessage = ['danger', $result['message']];
+    }
+}
+$pendingEmail = $isStudent ? $emailChange->pending($_SESSION['user_id']) : null;
+
 $user = $userObj->getUserById($_SESSION['user_id']);
 ?>
 <!DOCTYPE html>
@@ -107,7 +131,56 @@ $user = $userObj->getUserById($_SESSION['user_id']);
                 </div>
                 <div class="card-footer bg-white small text-muted">
                     <i class="bi bi-lock me-1" aria-hidden="true"></i>
-                    These details can't be edited here. If something is wrong, contact OSWD to have it corrected.
+                    These details can't be edited here, except your email (below). If something else is wrong, contact OSWD.
+                </div>
+            </div>
+
+            <!-- ===== Change email (students): new email → Send code → enter code ===== -->
+            <div data-bs-theme="<?php echo appTheme(); ?>" class="card nemsu-panel mt-4" id="change-email">
+                <div class="card-header"><i class="bi bi-envelope-at me-2" aria-hidden="true"></i>Change email</div>
+                <div class="card-body">
+                    <p class="small text-muted">Current email: <strong><?php echo htmlspecialchars($user['email']); ?></strong>. Sign-in codes and password resets are sent to your email.</p>
+                    <?php if ($emailMessage): ?>
+                        <div class="alert alert-<?php echo $emailMessage[0]; ?> py-2 small" role="alert"><?php echo htmlspecialchars($emailMessage[1]); ?></div>
+                    <?php endif; ?>
+
+                    <?php if (!$pendingEmail): ?>
+                        <!-- Step 1: type the new email, send a code to it -->
+                        <form method="POST" action="profile.php#change-email" data-no-loading>
+                            <?php echo csrfField(); ?>
+                            <label for="new_email" class="form-label">New email</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-envelope" aria-hidden="true"></i></span>
+                                <input type="email" class="form-control" id="new_email" name="new_email" required maxlength="100"
+                                       placeholder="you@gmail.com" autocomplete="email" value="<?php echo htmlspecialchars($_POST['new_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                                <button type="submit" name="send_email_code" value="1" class="btn btn-primary">
+                                    <i class="bi bi-send me-1" aria-hidden="true"></i>Send code
+                                </button>
+                            </div>
+                            <div class="form-text">We'll send a 6-digit code to the new email to make sure it's yours.</div>
+                        </form>
+                    <?php else: ?>
+                        <!-- Step 2: enter the code sent to the new email -->
+                        <form method="POST" action="profile.php#change-email" data-no-loading autocomplete="off">
+                            <?php echo csrfField(); ?>
+                            <label for="email_code" class="form-label">Code sent to <strong><?php echo htmlspecialchars($pendingEmail['email']); ?></strong></label>
+                            <div class="input-group" style="max-width: 360px">
+                                <input type="text" class="form-control" id="email_code" name="email_code" required
+                                       inputmode="numeric" pattern="\d{6}" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" autofocus>
+                                <button type="submit" name="verify_email_code" value="1" class="btn btn-success">
+                                    <i class="bi bi-check2-circle me-1" aria-hidden="true"></i>Confirm
+                                </button>
+                            </div>
+                            <div class="form-text">Check the inbox and spam folder of the new email. The code expires in <?php echo (int)(LOGIN_OTP_TTL / 60); ?> minutes.</div>
+                        </form>
+                        <form method="POST" action="profile.php#change-email" class="d-flex flex-wrap gap-2 mt-2" data-no-loading>
+                            <?php echo csrfField(); ?>
+                            <input type="hidden" name="new_email" value="<?php echo htmlspecialchars($pendingEmail['email'], ENT_QUOTES, 'UTF-8'); ?>">
+                            <button type="submit" name="send_email_code" value="1" class="btn btn-link btn-sm p-0">Resend code</button>
+                            <span class="text-muted small">·</span>
+                            <button type="submit" name="cancel_email_change" value="1" class="btn btn-link btn-sm p-0" formnovalidate>Use a different email</button>
+                        </form>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php else: ?>

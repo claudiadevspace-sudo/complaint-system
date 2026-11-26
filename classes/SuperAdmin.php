@@ -225,7 +225,11 @@ class SuperAdmin {
     public function getUser($userId) {
         $stmt = $this->db->prepare('SELECT * FROM users WHERE user_id = :id');
         $stmt->execute([':id' => (int)$userId]);
-        return $stmt->fetch() ?: null;
+        $row = $stmt->fetch() ?: null;
+        if ($row) {
+            $row['contact_number'] = Crypto::decryptField($row['contact_number']);   // stored encrypted
+        }
+        return $row;
     }
 
     /** Distinct departments/programs already in use, for the form suggestions. */
@@ -348,7 +352,7 @@ class SuperAdmin {
             ':student_id' => emptyToNull($d['student_id']),
             ':department' => emptyToNull($d['department']),
             ':program' => emptyToNull($d['program']),
-            ':contact' => emptyToNull($d['contact_number']),
+            ':contact' => Crypto::encryptField(emptyToNull($d['contact_number'])),
         ]);
         $id = (int)$this->db->lastInsertId();
 
@@ -401,7 +405,7 @@ class SuperAdmin {
             ':student_id' => emptyToNull($d['student_id']),
             ':department' => emptyToNull($d['department']),
             ':program' => emptyToNull($d['program']),
-            ':contact' => emptyToNull($d['contact_number']),
+            ':contact' => Crypto::encryptField(emptyToNull($d['contact_number'])),
             ':id' => (int)$userId,
         ]);
 
@@ -411,7 +415,8 @@ class SuperAdmin {
             $old = (string)($before[$field] ?? '');
             $new = (string)($d[$field] ?? '');
             if ($old !== $new) {
-                $changes[$field] = ['from' => $old, 'to' => $new];
+                // The audit log never stores a contact number in readable form.
+                $changes[$field] = $field === 'contact_number' ? ['from' => '(hidden)', 'to' => '(changed)'] : ['from' => $old, 'to' => $new];
             }
         }
         if ($changes) {
@@ -567,7 +572,11 @@ class SuperAdmin {
              FROM users WHERE user_id = :id'
         );
         $stmt->execute([':id' => (int)$match['user_id']]);
-        return ['success' => true, 'identity' => $stmt->fetch()];
+        $identity = $stmt->fetch();
+        if ($identity) {
+            $identity['contact_number'] = Crypto::decryptField($identity['contact_number']);
+        }
+        return ['success' => true, 'identity' => $identity];
     }
 
     /* ==============================================================

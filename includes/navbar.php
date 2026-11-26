@@ -1,7 +1,7 @@
 <?php
 // Unread notifications for the bell. Every signed-in user has one: students
 // (complaint updates), staff (e.g. a student approved/rejected resolution
-// proof), OSWD (account lockout requests) and the Super Admin.
+// proof), OSWD, and the Super Admin (account unlock requests).
 $unreadNotifications = 0;
 if (isLoggedIn()) {
     try {
@@ -25,7 +25,7 @@ if (isLoggedIn()) {
     }
 }
 $liveReloadPages = ['dashboard.php', 'assigned_complaints.php', 'complaints.php', 'my_complaints.php',
-    'notifications.php', 'super_admin.php', 'super_admin_complaints.php', 'lockout_reviews.php', 'view_complaint.php', 'services_complaints.php'];
+    'notifications.php', 'super_admin.php', 'super_admin_complaints.php', 'super_admin_unlock_requests.php', 'view_complaint.php', 'services_complaints.php'];
 ?>
 <?php if ($liveState): ?>
 <div id="liveUpdates" hidden
@@ -45,46 +45,30 @@ $liveReloadPages = ['dashboard.php', 'assigned_complaints.php', 'complaints.php'
             <?php echo nemsuLogoImg('nemsu-logo nemsu-logo--nav'); ?>
             <span class="d-none d-sm-inline">OSWD Complaints</span>
         </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
-                aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle account menu">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto align-items-center">
-                <li class="nav-item me-2">
-                    <?php $isDark = appTheme() === 'dark'; ?>
-                    <!-- Light/dark mode switch (assets/js/theme.js). Shows the mode it switches TO. -->
-                    <button type="button" class="btn btn-sm btn-outline-light nemsu-theme-toggle" id="themeToggle"
-                            data-current-theme="<?php echo $isDark ? 'dark' : 'light'; ?>"
-                            aria-label="<?php echo $isDark ? 'Switch to light mode' : 'Switch to dark mode'; ?>"
-                            title="<?php echo $isDark ? 'Switch to light mode' : 'Switch to dark mode'; ?>">
-                        <i class="bi bi-<?php echo $isDark ? 'sun' : 'moon-stars'; ?>" aria-hidden="true"></i>
-                    </button>
-                </li>
-                <?php if (isLoggedIn()): ?>
-                    <li class="nav-item me-2">
-                        <a class="nav-link position-relative nemsu-nav-bell" href="notifications.php" title="Notifications"
-                           aria-label="Notifications<?php echo $unreadNotifications > 0 ? ', ' . $unreadNotifications . ' unread' : ''; ?>">
-                            <i class="bi bi-bell" aria-hidden="true"></i>
-                            <?php if ($unreadNotifications > 0): ?>
-                                <span class="nemsu-notification-badge"><?php echo $unreadNotifications > 99 ? '99+' : $unreadNotifications; ?></span>
-                            <?php endif; ?>
-                        </a>
-                    </li>
-                <?php endif; ?>
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button"
-                       data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-person-circle" aria-hidden="true"></i>
-                        <?php echo htmlspecialchars($_SESSION['full_name'] ?? 'User'); ?>
+        <!-- Right side: light/dark switch and notifications, always visible (also on phones).
+             Profile and Log out are at the bottom of the sidebar. -->
+        <ul class="navbar-nav flex-row ms-auto align-items-center gap-2 nemsu-navbar-actions">
+            <li class="nav-item">
+                <?php $isDark = appTheme() === 'dark'; ?>
+                <!-- Light/dark mode switch (assets/js/theme.js). Shows the mode it switches TO. -->
+                <button type="button" class="btn btn-sm btn-outline-light nemsu-theme-toggle" id="themeToggle"
+                        data-current-theme="<?php echo $isDark ? 'dark' : 'light'; ?>"
+                        aria-label="<?php echo $isDark ? 'Switch to light mode' : 'Switch to dark mode'; ?>"
+                        title="<?php echo $isDark ? 'Switch to light mode' : 'Switch to dark mode'; ?>">
+                    <i class="bi bi-<?php echo $isDark ? 'sun' : 'moon-stars'; ?>" aria-hidden="true"></i>
+                </button>
+            </li>
+            <?php if (isLoggedIn()): ?>
+                <li class="nav-item">
+                    <a class="nav-link position-relative nemsu-nav-bell px-2" href="notifications.php" title="Notifications"
+                       aria-label="Notifications<?php echo $unreadNotifications > 0 ? ', ' . $unreadNotifications . ' unread' : ''; ?>">
+                        <i class="bi bi-bell" aria-hidden="true"></i>
+                        <?php if ($unreadNotifications > 0): ?>
+                            <span class="nemsu-notification-badge"><?php echo $unreadNotifications > 99 ? '99+' : $unreadNotifications; ?></span>
+                        <?php endif; ?>
                     </a>
-                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                        <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person-gear me-2" aria-hidden="true"></i> Profile</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="logout.php"><i class="bi bi-box-arrow-right me-2" aria-hidden="true"></i> Logout</a></li>
-                    </ul>
                 </li>
-            </ul>
-        </div>
+            <?php endif; ?>
+        </ul>
     </div>
 </nav>

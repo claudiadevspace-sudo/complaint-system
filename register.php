@@ -75,6 +75,8 @@ if (isset($_POST['register']) && !$verifiedId) {
             'password' => $_POST['password'] ?? '',
             'role' => 'student',
             'student_id' => $verifiedId,   // from step 1, not from the form
+            // Used only when OSWD's record has no email (User::register decides).
+            'email' => sanitizeInput($_POST['email'] ?? ''),
         ];
 
         $user = new User();
@@ -175,23 +177,34 @@ if ($authMessage !== null) {
                         <!-- Details from OSWD's enrolled record: shown, never editable. -->
                         <div class="col-12">
                             <div class="nemsu-enrolled-summary">
-                                <p class="small text-muted mb-2"><i class="bi bi-lock me-1" aria-hidden="true"></i>From your enrolled record. These cannot be changed here; if something is wrong, contact OSWD.</p>
+                                <p class="small text-muted mb-2"><i class="bi bi-lock me-1" aria-hidden="true"></i>From your enrolled record. Personal details are partly hidden (*) for privacy. If something is wrong, contact OSWD.</p>
                                 <dl class="row small mb-0">
                                     <dt class="col-sm-4">Full name</dt>
-                                    <dd class="col-sm-8"><?php echo htmlspecialchars($enrolledRecord['full_name'] ?? ''); ?></dd>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars(maskName($enrolledRecord['full_name'] ?? '')); ?></dd>
                                     <dt class="col-sm-4">Department</dt>
                                     <dd class="col-sm-8"><?php echo htmlspecialchars($enrolledRecord['department'] ?? ''); ?></dd>
                                     <dt class="col-sm-4">Program</dt>
                                     <dd class="col-sm-8"><?php echo htmlspecialchars(canonicalProgram($enrolledRecord['department'] ?? '', $enrolledRecord['program'] ?? '') ?? ''); ?></dd>
+                                    <?php if (!empty($enrolledRecord['email'])): ?>
                                     <dt class="col-sm-4">Email</dt>
-                                    <dd class="col-sm-8"><?php echo htmlspecialchars($enrolledRecord['email'] ?? ''); ?> <span class="text-muted">(sign-in codes are sent here)</span></dd>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars(maskEmailAddress($enrolledRecord['email'])); ?> <span class="text-muted">(sign-in codes are sent here)</span></dd>
+                                    <?php endif; ?>
                                     <dt class="col-sm-4">Contact number</dt>
-                                    <dd class="col-sm-8"><?php echo htmlspecialchars(($enrolledRecord['contact_number'] ?? '') ?: '—'); ?></dd>
+                                    <dd class="col-sm-8"><?php echo htmlspecialchars(maskPhone($enrolledRecord['contact_number'] ?? '') ?: '—'); ?></dd>
                                     <dt class="col-sm-4">Username</dt>
                                     <dd class="col-sm-8 mb-0"><?php echo htmlspecialchars($verifiedId); ?> <span class="text-muted">(your Student ID)</span></dd>
                                 </dl>
                             </div>
                         </div>
+                        <?php if (empty($enrolledRecord['email'])): ?>
+                        <!-- The enrolled list has no email for this student: the only detail they type. -->
+                        <div class="col-12">
+                            <label for="email" class="form-label">Email *</label>
+                            <input type="email" class="form-control" id="email" name="email" required maxlength="100" autocomplete="email"
+                                   placeholder="you@gmail.com" value="<?php echo htmlspecialchars($_POST['email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                            <div class="form-text">Use an email you can open: sign-in codes and password resets are sent there.</div>
+                        </div>
+                        <?php endif; ?>
                         <div class="col-md-6">
                             <label for="password" class="form-label">Password *</label>
                             <div class="input-group">

@@ -36,6 +36,12 @@ $db->exec("CREATE TABLE IF NOT EXISTS login_otps (
     INDEX idx_login_otps_user (user_id, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+try {
+    $db->exec("ALTER TABLE login_events ADD COLUMN feature_json TEXT NULL AFTER model_version");
+} catch (PDOException $e) {
+    // Column already exists.
+}
+
 echo "Login risk tables ready.\n";
 
 $trainScript = __DIR__ . '/ml_model/login_risk.py';
@@ -47,7 +53,7 @@ if (is_file($trainScript)) {
             continue;
         }
         $cmd = escapeshellarg($bin) . ' ' . escapeshellarg($trainScript) . ' train 2>&1';
-        $out = @shell_exec($cmd);
+        $out = (function_exists('shell_exec') ? @shell_exec($cmd) : null);
         if ($out && str_contains($out, '"success"')) {
             echo "Login risk model trained.\n";
             break;

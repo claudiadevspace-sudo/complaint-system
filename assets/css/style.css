@@ -2470,3 +2470,15 @@ body.auth-body .nemsu-enrolled-summary dt {
     opacity: 0.8;
     text-transform: none;
 }
+
+/* Top bar: bell and light/dark switch, always visible (no profile menu). */
+.nemsu-navbar .nemsu-navbar-actions .nemsu-nav-bell {
+    color: #ffffff;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.nemsu-navbar .nemsu-navbar-actions .nemsu-nav-bell:hover,
+.nemsu-navbar .nemsu-navbar-actions .nemsu-nav-bell:focus-visible {
+    color: var(--nemsu-gold-300, #f8d56f);
+}

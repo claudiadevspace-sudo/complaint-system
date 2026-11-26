@@ -88,6 +88,7 @@ if (isset($_POST['submit_complaint'])) {
                         $fileName = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
                         $targetPath = $uploadDir . $fileName;
                         if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                            Crypto::encryptFile($targetPath);   // evidence is stored encrypted
                             $supportingDocs = $fileName;
                         } else {
                             $errors[] = 'Failed to save the uploaded file.';
@@ -249,15 +250,6 @@ $pageScripts = ['assets/js/wizard.js?v=' . (int)@filemtime(__DIR__ . '/assets/js
                                         <small class="text-muted d-block mt-2">Max 5MB · PDF, JPG, PNG, DOC, DOCX</small>
                                     </div>
                                     <div id="filePreview" class="mt-2"></div>
-                                </div>
-                                <div class="col-12">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="confidential_toggle" disabled>
-                                        <label class="form-check-label text-muted" for="confidential_toggle">
-                                            Submit confidentially (coming soon)
-                                        </label>
-                                    </div>
-                                    <!-- TODO: wire confidential flag when backend supports restricted visibility -->
                                 </div>
                             </div>
                             <div class="d-flex justify-content-between mt-4">

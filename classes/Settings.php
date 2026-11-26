@@ -107,8 +107,20 @@ class Settings {
         ],
         'programs_DGTT' => [
             'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
-            'default' => ['Bachelor of Elementary Education', 'Bachelor of Secondary Education'],
+            'default' => ['Bachelor of Elementary Education', 'Bachelor of Secondary Education',
+                          'Bachelor of Technology and Livelihood Education',
+                          'Bachelor of Technical-Vocational Teacher Education'],
             'label' => 'DGTT programs', 'help' => 'One program per line.',
+        ],
+        'programs_DTM' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['BS Tourism Management'],
+            'label' => 'DTM programs', 'help' => 'One program per line.',
+        ],
+        'programs_GS' => [
+            'group' => 'programs', 'type' => 'lines', 'max' => 100, 'max_lines' => 20,
+            'default' => ['Master of Technology Teacher Education'],
+            'label' => 'GS (Graduate School) programs', 'help' => 'One program per line.',
         ],
     ];
 

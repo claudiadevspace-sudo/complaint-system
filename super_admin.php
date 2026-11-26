@@ -7,6 +7,10 @@
 require_once 'config/config.php';
 requireRole('super_admin');   // role check, not just "logged in"
 
+// One-time: encrypt files and contact numbers saved before encryption was added
+// (does nothing after the first run on this server; see classes/Crypto.php).
+Crypto::encryptExistingData();
+
 $overview = (new SuperAdmin())->overview();
 $levelIcons = [
     'program_coordinator' => 'person-workspace',

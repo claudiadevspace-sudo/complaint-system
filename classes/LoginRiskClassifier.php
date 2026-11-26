@@ -19,7 +19,7 @@ class LoginRiskClassifier {
     }
 
     private function predictWithPython(array $features) {
-        if (!$this->pythonPath || !is_file($this->scriptPath) || !function_exists('shell_exec')) {
+        if (!$this->pythonPath || !is_file($this->scriptPath) ) {
             return null;
         }
 
@@ -31,7 +31,7 @@ class LoginRiskClassifier {
         $command = escapeshellarg($this->pythonPath) . ' '
             . escapeshellarg($this->scriptPath) . ' predict '
             . escapeshellarg($json) . ' 2>&1';
-        $output = @shell_exec($command);
+        $output = runShell($command);
         if (!$output) {
             return null;
         }
@@ -87,7 +87,7 @@ class LoginRiskClassifier {
     }
 
     private function pythonWorks($binary) {
-        $output = @shell_exec(escapeshellarg($binary) . ' --version 2>&1');
+        $output = runShell(escapeshellarg($binary) . ' --version 2>&1');
         return is_string($output) && stripos($output, 'python') !== false;
     }
 }

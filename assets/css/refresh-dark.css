@@ -1,0 +1,251 @@
+/*
+ * Visual refresh — dark mode. Loaded by includes/head.php after refresh.css
+ * when the dark theme is chosen (dashboards and, now, the sign-in pages).
+ *
+ * Dark palette: deep blue-grey surfaces instead of pure black/navy, softened
+ * text (not pure white) to reduce glare, a lighter tint of the same royal
+ * blue for links and active items, and the logo gold for small highlights.
+ *   page #0f1424 · surface #171d30 · raised #1d2439 · border #283049
+ *   text #e4e7ef · muted #9aa2b8 · primary #5865e0 (buttons) / #9aa5f7 (text)
+ */
+
+:root {
+    --rf-primary: #5865e0;
+    --rf-primary-hover: #6a76ea;
+    --rf-primary-strong: #141a2e;     /* top bar */
+    --rf-primary-50: rgba(154, 165, 247, 0.10);
+    --rf-primary-100: rgba(154, 165, 247, 0.22);
+    --rf-primary-text: #9aa5f7;
+
+    --rf-gold: #d9ab3a;
+    --rf-gold-soft: rgba(217, 171, 58, 0.14);
+
+    --rf-bg: #0f1424;
+    --rf-surface: #171d30;
+    --rf-surface-2: #1d2439;
+    --rf-border: #283049;
+    --rf-border-strong: #343d5a;
+    --rf-text: #e4e7ef;
+    --rf-text-muted: #9aa2b8;
+    --rf-text-faint: #747c94;
+
+    --rf-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --rf-shadow-hover: 0 8px 20px rgba(0, 0, 0, 0.35);
+    --rf-focus: 0 0 0 3px rgba(154, 165, 247, 0.28);
+}
+
+/* ---- Signed-in pages ---- */
+html body.app-body {
+    --bs-body-bg: var(--rf-bg);
+    --bs-body-color: var(--rf-text);
+    --bs-emphasis-color: #f3f4f8;
+    --bs-heading-color: #eef0f5;
+    --bs-secondary-color: var(--rf-text-muted);
+    --bs-secondary-bg: var(--rf-surface-2);
+    --bs-tertiary-bg: var(--rf-surface);
+    --bs-border-color: var(--rf-border);
+    --bs-link-color: var(--rf-primary-text);
+    --bs-link-hover-color: #c2c8fb;
+    --bs-link-color-rgb: 154, 165, 247;
+    --nemsu-blue-900: var(--rf-text);
+    --nemsu-blue-700: var(--rf-primary-text);
+    --nemsu-blue-600: var(--rf-primary-text);
+    background: var(--rf-bg);
+    color: var(--rf-text);
+}
+
+html body.app-body .nemsu-page-header h1,
+html body.app-body main h1.h2 { color: #eef0f5; }
+html body.app-body .nemsu-page-header .text-muted,
+html body.app-body .nemsu-page-header p,
+html body.app-body .text-muted { color: var(--rf-text-muted) !important; }
+
+/* Top bar and sidebar: one tone above the page */
+html body.app-body .navbar.nemsu-navbar {
+    background: var(--rf-primary-strong) !important;
+    border-bottom: 1px solid var(--rf-border);
+    box-shadow: inset 0 -2px 0 rgba(217, 171, 58, 0.55);
+}
+html body.app-body .nemsu-sidebar,
+html body.app-body .sidebar.nemsu-sidebar,
+html body.app-body .offcanvas-md.nemsu-sidebar,
+html body.app-body .offcanvas.nemsu-sidebar {
+    background: #131929 !important;
+    border-right: 1px solid var(--rf-border);
+}
+html body.app-body .nemsu-sidebar .btn-close { filter: invert(1) grayscale(100%) brightness(180%); }
+html body.app-body .nemsu-sidebar .nav-link { color: #b9c0d3; }
+html body.app-body .nemsu-sidebar .nav-link i { color: #8189a3; }
+html body.app-body .nemsu-sidebar .nav-link:hover,
+html body.app-body .nemsu-sidebar .nav-link:focus-visible { background: rgba(255, 255, 255, 0.04); color: var(--rf-text); }
+html body.app-body .nemsu-sidebar .nav-link.active { background: var(--rf-primary-50); color: #eef0f5; }
+html body.app-body .nemsu-sidebar .nav-link.active i { color: var(--rf-primary-text); }
+html body.app-body .nemsu-sidebar__avatar { background: rgba(217, 171, 58, 0.18); color: #f0d48c; }
+html body.app-body .nemsu-sidebar__profile-btn--logout:hover,
+html body.app-body .nemsu-sidebar__profile-btn--logout:focus-visible { background: rgba(244, 86, 106, 0.16); border-color: rgba(244, 86, 106, 0.35); color: #ffb3bd; }
+
+/* Cards: solid surface instead of glowing gradients */
+html body.app-body .card,
+html body.app-body .card[data-bs-theme="dark"] {
+    --bs-body-bg: var(--rf-surface);
+    --bs-secondary-bg: var(--rf-surface-2);
+    --bs-tertiary-bg: var(--rf-surface-2);
+    --bs-border-color: var(--rf-border);
+    --nemsu-blue-50: rgba(255, 255, 255, 0.03);
+    background: var(--rf-surface);
+    border: 1px solid var(--rf-border);
+    box-shadow: var(--rf-shadow);
+    color: var(--rf-text);
+}
+html body.app-body .card[data-bs-theme="dark"] > .card-header:not(.bg-warning-subtle),
+html body.app-body .card[data-bs-theme="dark"] .card-header:not(.bg-warning-subtle),
+html body.app-body .card-header:not(.bg-warning-subtle) {
+    background: var(--rf-surface);
+    color: #eef0f5;
+    border-bottom: 1px solid var(--rf-border);
+}
+html body.app-body .card-header:not(.bg-warning-subtle) > i,
+html body.app-body .card-header:not(.bg-warning-subtle) > span > i { color: var(--rf-primary-text); }
+html body.app-body .card[data-bs-theme="dark"] .card-footer,
+html body.app-body .card[data-bs-theme="dark"] .card-footer.bg-white,
+html body.app-body .card[data-bs-theme="dark"] .bg-white,
+html body.app-body .card-footer { background: var(--rf-surface-2) !important; border-top-color: var(--rf-border); color: var(--rf-text-muted); }
+
+/* Tables and forms inside cards */
+html body.app-body .card[data-bs-theme="dark"] .table,
+html body.app-body .table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--rf-text);
+    --bs-table-border-color: var(--rf-border);
+    --bs-table-hover-bg: rgba(255, 255, 255, 0.03);
+    --bs-table-hover-color: #f3f4f8;
+}
+html body.app-body .card[data-bs-theme="dark"] .nemsu-table thead th,
+html body.app-body .table thead th,
+html body.app-body .nemsu-table thead th {
+    background: var(--rf-surface-2);
+    color: var(--rf-text-muted);
+    box-shadow: none;
+    border-bottom: 1px solid var(--rf-border);
+}
+html body.app-body .card[data-bs-theme="dark"] .form-label,
+html body.app-body .card[data-bs-theme="dark"] .form-check-label { color: #c6cbda; }
+html body.app-body .form-control,
+html body.app-body .form-select,
+html body.app-body .card[data-bs-theme="dark"] .form-control,
+html body.app-body .card[data-bs-theme="dark"] .form-select {
+    background-color: #12182a;
+    border-color: var(--rf-border-strong);
+    color: var(--rf-text);
+}
+html body.app-body .input-group-text { background: var(--rf-surface-2); border-color: var(--rf-border-strong); color: var(--rf-text-muted); }
+
+/* Stat cards */
+html body.app-body .nemsu-stat-grid .nemsu-stat-card--nav,
+html body.app-body .nemsu-stat-card--blue,
+html body.app-body .nemsu-stat-card--sky {
+    background: var(--rf-surface);
+    border: 1px solid var(--rf-border);
+    border-top: 3px solid var(--rf-primary);
+    color: var(--rf-text);
+}
+html body.app-body .nemsu-stat-card h2 { color: #f3f4f8; }
+html body.app-body .nemsu-stat-card .stat-icon { color: var(--rf-primary-text); opacity: 0.4; }
+html body.app-body .nemsu-stat-card--link.is-active { background: #1b2240; border-color: var(--rf-primary-100); }
+
+/* Buttons */
+html body.app-body main .btn-outline-primary,
+html body.app-body .btn-outline-primary {
+    --bs-btn-color: var(--rf-primary-text);
+    --bs-btn-border-color: rgba(154, 165, 247, 0.45);
+    --bs-btn-hover-bg: var(--rf-primary);
+    --bs-btn-hover-border-color: var(--rf-primary);
+    --bs-btn-hover-color: #ffffff;
+    color: var(--rf-primary-text);
+    border-color: rgba(154, 165, 247, 0.45);
+}
+html body.app-body main .btn-outline-primary:hover { background: var(--rf-primary); border-color: var(--rf-primary); color: #ffffff; }
+html body.app-body main .btn-outline-secondary,
+html body.app-body .btn-outline-secondary { --bs-btn-color: #c6cbda; --bs-btn-border-color: var(--rf-border-strong); color: #c6cbda; border-color: var(--rf-border-strong); }
+html body.app-body main .btn-outline-secondary:hover { background: rgba(255, 255, 255, 0.06); color: #f3f4f8; }
+
+/* Menus, pop-ups, tabs, pagination, chat */
+html body.app-body .dropdown-menu { --bs-dropdown-bg: var(--rf-surface-2); --bs-dropdown-border-color: var(--rf-border); --bs-dropdown-link-color: var(--rf-text); --bs-dropdown-link-hover-bg: rgba(255, 255, 255, 0.05); }
+html body.app-body .modal-content { background: var(--rf-surface); border: 1px solid var(--rf-border); color: var(--rf-text); }
+html body.app-body .modal-header,
+html body.app-body .modal-footer { border-color: var(--rf-border); }
+html body.app-body .nav-tabs { --bs-nav-tabs-border-color: var(--rf-border); --bs-nav-tabs-link-active-bg: var(--rf-surface); --bs-nav-tabs-link-active-color: #eef0f5; --bs-nav-tabs-link-active-border-color: var(--rf-border) var(--rf-border) var(--rf-surface); }
+html body.app-body .pagination { --bs-pagination-bg: var(--rf-surface); --bs-pagination-color: var(--rf-primary-text); --bs-pagination-border-color: var(--rf-border); --bs-pagination-hover-bg: var(--rf-surface-2); --bs-pagination-active-bg: var(--rf-primary); --bs-pagination-active-border-color: var(--rf-primary); }
+html body.app-body .nemsu-chat-bubble { background: var(--rf-surface-2); border-color: var(--rf-border); }
+html body.app-body .nemsu-chat-bubble--mine { background: rgba(154, 165, 247, 0.10); border-color: rgba(154, 165, 247, 0.22); }
+html body.app-body .nemsu-user-chip { background: var(--rf-surface); border-color: var(--rf-border); color: var(--rf-text-muted); }
+
+/* ---- Sign-in pages in dark mode ---- */
+html body.auth-body {
+    --bs-body-bg: var(--rf-bg);
+    --bs-body-color: var(--rf-text);
+    --bs-border-color: var(--rf-border);
+    --bs-secondary-color: var(--rf-text-muted);
+    background: var(--rf-bg);
+    color: var(--rf-text);
+    color-scheme: dark;
+}
+html body.auth-body .auth-panel-brand {
+    background: linear-gradient(160deg, #141a2e 0%, #1b2342 100%);
+    border-right-color: rgba(217, 171, 58, 0.75);
+}
+html body.auth-body .auth-panel-brand__campus,
+html body.auth-body .auth-panel-brand__list li i { color: #e6c36e; }
+html body.auth-body .auth-form-card {
+    background: var(--rf-surface);
+    border-color: var(--rf-border);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    color: var(--rf-text);
+}
+html body.auth-body .auth-form-card h2 { color: #eef0f5; }
+html body.auth-body .text-muted,
+html body.auth-body .form-text { color: var(--rf-text-muted) !important; }
+html body.auth-body .form-label { color: #c6cbda; }
+html body.auth-body .form-control,
+html body.auth-body .form-select,
+html body.auth-body .otp-digit {
+    background-color: #12182a;
+    border-color: var(--rf-border-strong);
+    color: var(--rf-text);
+}
+html body.auth-body .form-control::placeholder { color: #6c7590; }
+html body.auth-body .input-group-text { background: var(--rf-surface-2); border-color: var(--rf-border-strong); color: var(--rf-text-muted); }
+html body.auth-body .input-group:focus-within .input-group-text { background: var(--rf-primary-50); color: var(--rf-primary-text); }
+html body.auth-body .btn-outline-primary,
+html body.auth-body .btn-outline-secondary { --bs-btn-color: #c6cbda; --bs-btn-border-color: var(--rf-border-strong); --bs-btn-hover-bg: rgba(255, 255, 255, 0.06); --bs-btn-hover-color: #f3f4f8; --bs-btn-hover-border-color: var(--rf-border-strong); }
+html body.auth-body a { color: var(--rf-primary-text); }
+html body.auth-body a:hover { color: #c2c8fb; }
+html body.auth-body .alert-warning { background: rgba(217, 171, 58, 0.12); border-color: rgba(217, 171, 58, 0.3); color: #f2dca0; }
+html body.auth-body .alert-danger { background: rgba(244, 86, 106, 0.12); border-color: rgba(244, 86, 106, 0.3); color: #ffc4cc; }
+html body.auth-body .alert-success { background: rgba(34, 197, 139, 0.12); border-color: rgba(34, 197, 139, 0.3); color: #b6ecd6; }
+html body.auth-body .alert-info { background: rgba(154, 165, 247, 0.10); border-color: rgba(154, 165, 247, 0.25); color: #ccd1fb; }
+html body.auth-body .nemsu-enrolled-summary { background: var(--rf-surface-2); border-color: var(--rf-border); }
+html body.auth-body .nemsu-enrolled-summary dt { color: #eef0f5; }
+html body.auth-body .progress { background-color: var(--rf-surface-2); }
+html body.auth-body .btn-close { filter: invert(1) grayscale(100%) brightness(180%); }
+
+/* Highlighted rows in dark mode: faint tint, coloured edge kept */
+html body.app-body .table-danger,
+html body.app-body .card[data-bs-theme] .table-danger {
+    --bs-table-bg: rgba(244, 86, 106, 0.07);
+    --bs-table-hover-bg: rgba(244, 86, 106, 0.11);
+}
+html body.app-body .table-warning,
+html body.app-body .card[data-bs-theme] .table-warning {
+    --bs-table-bg: rgba(217, 171, 58, 0.07);
+    --bs-table-hover-bg: rgba(217, 171, 58, 0.11);
+}
+html body.app-body .nemsu-stat-card .display-6 { color: #f3f4f8; }
+
+/* Dark mode logo tile: the app-icon navy with a faint outline. */
+.auth-brand-icon,
+html body.auth-body .auth-panel-brand .auth-brand-icon,
+.nemsu-logo--nav {
+    background: #0b1530;
+    box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.22), 0 8px 24px rgba(0, 0, 0, 0.35);
+}

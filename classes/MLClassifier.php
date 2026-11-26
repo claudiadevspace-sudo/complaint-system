@@ -47,7 +47,7 @@ class MLClassifier {
         }
 
         $command = $this->buildCommand(['train']);
-        $output = @shell_exec($command);
+        $output = runShell($command);
         $result = json_decode((string)$output, true);
 
         return $result ?? ['success' => false, 'message' => 'Training failed'];
@@ -59,7 +59,7 @@ class MLClassifier {
         }
 
         $command = $this->buildCommand(['predict', $complaintText]);
-        $output = @shell_exec($command);
+        $output = runShell($command);
         if (!$output) {
             return null;
         }
@@ -106,7 +106,7 @@ class MLClassifier {
         if (!function_exists('shell_exec')) {
             return false;
         }
-        $output = @shell_exec(escapeshellarg($binary) . ' --version 2>&1');
+        $output = runShell(escapeshellarg($binary) . ' --version 2>&1');
         return is_string($output) && stripos($output, 'python') !== false;
     }
 

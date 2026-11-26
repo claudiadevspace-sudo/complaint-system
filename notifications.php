@@ -61,7 +61,7 @@ $unreadCount = $notificationService->getUnreadCount($userId);
                         [$emptyText, $emptyLabel, $emptyLink] = match ($role) {
                             'student' => ['Updates about your complaints will appear here.', 'View my complaints', 'my_complaints.php'],
                             'super_admin' => ['System notices will appear here.', 'Go to overview', 'super_admin.php'],
-                            'oswd' => ['Updates on complaints and account lockout requests will appear here.', 'Go to dashboard', 'dashboard.php'],
+                            'oswd' => ['Updates on complaints will appear here.', 'Go to dashboard', 'dashboard.php'],
                             default => ['Updates on complaints assigned to you (for example, a student approving or rejecting resolution proof) will appear here.', 'Assigned to me', 'assigned_complaints.php'],
                         };
                         echo renderEmptyState('bell', 'No notifications yet', $emptyText, $emptyLabel, $emptyLink);

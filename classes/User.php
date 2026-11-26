@@ -43,7 +43,13 @@ class User {
             $data['full_name'] = $record['full_name'];
             $data['department'] = $record['department'];
             $data['program'] = $record['program'];
-            $data['email'] = $record['email'];
+            // Email: from the list when OSWD has it, otherwise the one the student typed.
+            $data['email'] = filter_var($record['email'] ?? '', FILTER_VALIDATE_EMAIL)
+                ? $record['email']
+                : strtolower(trim((string)($data['email'] ?? '')));
+            if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+                return ['success' => false, 'message' => 'Please enter a valid email address (sign-in codes are sent there).'];
+            }
             $data['contact_number'] = (string)($record['contact_number'] ?? '');
             $data['username'] = $data['student_id'];
             $username = $data['username'];
@@ -93,7 +99,7 @@ class User {
                 ':student_id' => emptyToNull($data['student_id'] ?? null),
                 ':department' => emptyToNull($data['department'] ?? null),
                 ':program' => emptyToNull($data['program'] ?? null),
-                ':contact_number' => emptyToNull($data['contact_number'] ?? null)
+                ':contact_number' => Crypto::encryptField(emptyToNull($data['contact_number'] ?? null))
             ]);
             
             return ['success' => true, 'message' => 'Registration successful! You can now log in.'];
@@ -115,7 +121,11 @@ class User {
             $sql = "SELECT * FROM users WHERE user_id = :user_id";
             $stmt = $this->db->prepare($sql);
             $stmt->execute([':user_id' => $userId]);
-            return $stmt->fetch();
+            $row = $stmt->fetch();
+            if ($row) {
+                $row['contact_number'] = Crypto::decryptField($row['contact_number']);   // stored encrypted
+            }
+            return $row;
         } catch (PDOException $e) {
             return null;
         }
@@ -323,7 +333,7 @@ class User {
             $stmt->execute([
                 ':full_name' => trim($data['full_name'] ?? ''),
                 ':email' => trim($data['email'] ?? ''),
-                ':contact_number' => emptyToNull($data['contact_number'] ?? null),
+                ':contact_number' => Crypto::encryptField(emptyToNull($data['contact_number'] ?? null)),
                 ':department' => $department,
                 ':program' => $program,
                 ':user_id' => $userId

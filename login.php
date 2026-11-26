@@ -49,7 +49,7 @@ if (isset($_POST['login'])) {
         $password = $_POST['password'] ?? '';
         // An empty form is not a real attempt: don't count it toward the lock.
         if ($username === '' || $password === '') {
-            $_SESSION['message'] = 'Enter your username and password.';
+            $_SESSION['message'] = 'Enter your Student ID or email and password.';
             $_SESSION['message_type'] = 'danger';
             redirect('login.php');
         }
@@ -129,7 +129,8 @@ if ($authMessage !== null) {
                     <p class="text-muted small mb-4">Use your student or staff account for NEMSU Cantilan.</p>
                     <?php if ($isBlocked): ?>
                         <div class="alert alert-warning py-2" role="alert">
-                            Your account is locked for 1 day. Contact Student Services so OSWD can review your request and help you reset your credentials.
+                            Your account is locked for 1 day. <a href="student_services.php" class="alert-link">Contact Student Services</a>
+                            and tell us what happened. When the Super Admin approves, an unlock code is sent to your email.
                         </div>
                     <?php endif; ?>
                 <?php endif; ?>
@@ -172,13 +173,15 @@ if ($authMessage !== null) {
                     <form method="POST" action="login.php" data-no-loading id="loginForm"<?php echo $isCooldown ? ' class="login-form--locked"' : ''; ?>>
                         <?php echo csrfField(); ?>
                         <div class="mb-3">
-                            <label for="username" class="form-label">Username or email</label>
+                            <label for="username" class="form-label">Student ID or email</label>
                             <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-person" aria-hidden="true"></i></span>
+                                <span class="input-group-text"><i class="bi bi-person-vcard" aria-hidden="true"></i></span>
                                 <input type="text" class="form-control" id="username" name="username" required autofocus
-                                       autocomplete="username" value="<?php echo htmlspecialchars($loginUsername, ENT_QUOTES, 'UTF-8'); ?>"
+                                       placeholder="e.g. 2023-01721 or you@gmail.com" autocomplete="username"
+                                       value="<?php echo htmlspecialchars($loginUsername, ENT_QUOTES, 'UTF-8'); ?>"
                                        <?php echo $isCooldown ? 'readonly' : ''; ?>>
                             </div>
+                            <div class="form-text">Staff: sign in with your username or email.</div>
                         </div>
                         <div class="mb-4">
                             <label for="password" class="form-label">Password</label>
@@ -199,8 +202,12 @@ if ($authMessage !== null) {
                             </p>
                         <?php endif; ?>
                     </form>
+                    <!-- 1. Forgot password  2. Contact Student Services  3. Register -->
                     <p class="text-center small mt-3 mb-0">
                         <a href="forgot_password.php"><i class="bi bi-key me-1" aria-hidden="true"></i>Forgot password?</a>
+                    </p>
+                    <p class="text-center small mt-2 mb-0">
+                        <a href="student_services.php"><i class="bi bi-life-preserver me-1" aria-hidden="true"></i>Account locked? Contact Student Services</a>
                     </p>
                     <p class="text-center text-muted small mt-2 mb-0">No account? <a href="register.php">Register as a student</a></p>
                 <?php endif; ?>

@@ -26,6 +26,16 @@ if (session_status() === PHP_SESSION_NONE) {
 // Include database configuration
 require_once __DIR__ . '/database.php';
 
+// Compare text with the same rule (collation) the tables use. Some hosts
+// (e.g. Hostinger) default the connection to utf8mb4_general_ci while the
+// tables are utf8mb4_unicode_ci, and newer MariaDB/MySQL versions then refuse
+// queries that compare the two ("Illegal mix of collations").
+try {
+    Database::getInstance()->getConnection()->exec('SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci');
+} catch (PDOException $e) {
+    // Never block the page over this.
+}
+
 // Autoload classes
 spl_autoload_register(function ($class) {
     $paths = [
@@ -49,17 +59,40 @@ define('SITE_NAME', Settings::get('site_name'));
 define('REGISTRATION_OPEN', Settings::get('registration_open'));
 define('MAINTENANCE_MODE', Settings::get('maintenance_mode'));
 define('MAINTENANCE_MESSAGE', Settings::get('maintenance_message'));
-// Use the host the visitor actually reached (e.g. 192.168.1.59 from a phone on
-// the same Wi-Fi) so redirects work on every device. Only localhost and
-// private LAN addresses are trusted; anything else falls back to localhost so
-// a forged Host header can't poison links in emails.
-$requestHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
-$trustedHost = preg_match(
-    '/^(localhost|127\.0\.0\.1|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2})(:\d{1,5})?$/',
-    $requestHost
-);
-define('SITE_URL', 'http://' . ($trustedHost ? $requestHost : 'localhost') . '/Complaint');
-define('SITE_LOGO', 'assets/images/nemsu-logo.png');
+/*
+ * Site address, used for redirects and for links in emails. Worked out from
+ * the request, so the same files run unchanged:
+ *   on this computer   http://localhost/Complaint
+ *   on the campus LAN  http://192.168.x.x/Complaint
+ *   on the web host    https://your-domain   (files directly in public_html)
+ * To fix it to one address (recommended on the live site, so a forged Host
+ * header can never change links in emails), set SITE_URL_FIXED below, e.g.
+ *   define('SITE_URL_FIXED', 'https://oswd.example.com');
+ */
+define('SITE_URL_FIXED', '');
+
+if (SITE_URL_FIXED !== '') {
+    define('SITE_URL', rtrim(SITE_URL_FIXED, '/'));
+} elseif (PHP_SAPI === 'cli') {
+    define('SITE_URL', 'http://localhost/Complaint');
+} else {
+    $requestHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? 'localhost'));
+    if (!preg_match('/^[a-z0-9.-]+(:\d{1,5})?$/', $requestHost)) {
+        $requestHost = 'localhost';   // malformed Host header
+    }
+    $isHttps = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off')
+        || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+        || (string)($_SERVER['SERVER_PORT'] ?? '') === '443';
+    // Every page lives in the project's top folder, so its folder is the base
+    // path: "/Complaint" locally, "" when the files are in public_html.
+    $basePath = rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/'))), '/');
+    define('SITE_URL', ($isHttps ? 'https' : 'http') . '://' . $requestHost . $basePath);
+}
+// System logo (shield mark): the navy/blue mark for light mode and the
+// white/blue one for dark mode. The favicon is the app icon.
+define('SITE_LOGO', 'assets/images/logo-mark.png');
+define('SITE_LOGO_DARK', 'assets/images/logo-mark-dark.png');
+define('SITE_FAVICON', 'assets/images/favicon.png');
 define('ADMIN_EMAIL', 'oswd@nemsu.edu');
 
 $smtpConfig = __DIR__ . '/smtp.php';
@@ -95,6 +128,7 @@ define('LOGIN_COOLDOWN_SECONDS', Settings::get('login_cooldown_seconds'));
 define('LOGIN_BLOCK_AFTER_FAILS', Settings::get('login_block_after_fails'));
 define('LOGIN_BLOCK_SECONDS', Settings::get('login_block_hours') * 3600);
 define('LOGIN_RESET_TTL', 3600);
+define('LOGIN_OTP_MAX_ATTEMPTS', 5);
 
 // Timezone
 date_default_timezone_set('Asia/Manila');
@@ -104,6 +138,22 @@ date_default_timezone_set('Asia/Manila');
 // (migrations, backups) still print them.
 error_reporting(E_ALL);
 ini_set('display_errors', PHP_SAPI === 'cli' ? '1' : '0');
+
+// Errors are written to logs/php_errors.log (private: logs/.htaccess blocks
+// the browser), so an "Error 500" on any server can be diagnosed from the
+// File Manager. The folder and its protection are created automatically.
+$logDir = __DIR__ . '/../logs';
+if (!is_dir($logDir)) {
+    @mkdir($logDir, 0750, true);
+}
+if (is_dir($logDir) && !is_file($logDir . '/.htaccess')) {
+    @file_put_contents($logDir . '/.htaccess', "# Private: never served to the browser.\nRequire all denied\n");
+}
+if (is_dir($logDir) && is_writable($logDir)) {
+    ini_set('log_errors', '1');
+    ini_set('error_log', $logDir . '/php_errors.log');
+}
+unset($logDir);
 ini_set('log_errors', '1');
 
 if (!headers_sent()) {
@@ -213,12 +263,17 @@ if (MAINTENANCE_MODE && isset($_SESSION['user_id']) && ($_SESSION['role'] ?? '')
  * Default: dark. Sign-in, registration and other public pages are always
  * light: the mode only applies while someone is signed in.
  */
+/**
+ * Light or dark mode, saved in the 'nemsu_theme' cookie by the switch in the
+ * top bar (dashboards) or the corner of the sign-in pages. Default: dark on
+ * the dashboards, light on the sign-in pages.
+ */
 function appTheme() {
-    if (!isLoggedIn()) {
-        return 'light';
-    }
     $saved = $_COOKIE['nemsu_theme'] ?? '';
-    return in_array($saved, ['light', 'dark'], true) ? $saved : 'dark';
+    if (in_array($saved, ['light', 'dark'], true)) {
+        return $saved;
+    }
+    return isLoggedIn() ? 'dark' : 'light';
 }
 
 /**
@@ -249,13 +304,13 @@ function redirect($url) {
 }
 
 function nemsuLogoImg($class = 'nemsu-logo') {
-    $path = SITE_LOGO;
+    $path = appTheme() === 'dark' ? SITE_LOGO_DARK : SITE_LOGO;
     $full = __DIR__ . '/../' . $path;
     if (!is_file($full)) {
         return '';
     }
     $class = trim((string)$class);
-    $alt = 'North Eastern Mindanao State University';
+    $alt = 'OSWD Student Complaint System';
     return '<img src="' . htmlspecialchars($path, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($alt, ENT_QUOTES, 'UTF-8') . '" class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '" decoding="async">';
 }
 
@@ -458,7 +513,29 @@ function programRoles() {
  * of these, so every department's personnel are spelled the same way.
  */
 function departments() {
-    return ['DIT', 'DCS', 'CCJE', 'DBM', 'DGTT'];
+    return ['DIT', 'DCS', 'CCJE', 'DBM', 'DGTT', 'DTM', 'GS'];
+}
+
+/**
+ * Course codes used in the campus Student Directory (e.g. "BSIT AUTO.",
+ * "BSInfoTech", "BSBA HRDM", "BSED MATH") → the official program they
+ * belong to. Majors are grouped under their program. Keys are matched on
+ * letters only, from the start of the code (longest key first).
+ */
+function directoryCourseAliases() {
+    return [
+        'DIT' => ['BSIT' => 'BS Industrial Technology'],
+        'DCS' => ['BSINFOTECH' => 'BS Information Technology', 'BSCS' => 'BS Computer Science',
+                  'BSCPE' => 'BS Computer Engineering'],
+        'CCJE' => ['BSCRIM' => 'BS Criminology'],
+        'DBM' => ['BSBA' => 'BS Business Administration', 'BSHRM' => 'BS Hospitality Management',
+                  'BSHM' => 'BS Hospitality Management'],
+        'DGTT' => ['BSED' => 'Bachelor of Secondary Education', 'BEED' => 'Bachelor of Elementary Education',
+                   'BTLED' => 'Bachelor of Technology and Livelihood Education',
+                   'BTVTED' => 'Bachelor of Technical-Vocational Teacher Education'],
+        'DTM' => ['BSTM' => 'BS Tourism Management'],
+        'GS' => ['MTTE' => 'Master of Technology Teacher Education'],
+    ];
 }
 
 /**
@@ -503,6 +580,7 @@ function saveUploadedDocument($file) {
     if (!move_uploaded_file($file['tmp_name'], $uploadDir . $fileName)) {
         return ['ok' => false, 'message' => 'Failed to save the uploaded file.'];
     }
+    Crypto::encryptFile($uploadDir . $fileName);   // stored encrypted (see classes/Crypto.php)
     return ['ok' => true, 'file' => $fileName, 'original' => $originalName];
 }
 
@@ -552,7 +630,7 @@ function programAcronym($key) {
  * or without "BS"/"Bachelor of ...", or its initials:
  * "it", "BSIT", "BS in Information Technology" → "Information Technology".
  */
-function canonicalProgram($department, $program) {
+function canonicalProgram($department, $program, $tryAliases = true) {
     $wanted = programKey($program);
     if ($wanted === '') {
         return null;
@@ -562,6 +640,17 @@ function canonicalProgram($department, $program) {
         $officialKey = programKey($official);
         if ($officialKey === $wanted || ($wantedLetters !== '' && programAcronym($officialKey) === $wantedLetters)) {
             return $official;
+        }
+    }
+    // Student Directory course codes ("BSIT AUTO." → BS Industrial Technology).
+    if ($tryAliases) {
+        $code = strtoupper(preg_replace('/[^A-Za-z]+/', '', (string)$program));
+        $aliases = directoryCourseAliases()[strtoupper(trim((string)$department))] ?? [];
+        uksort($aliases, fn($a, $b) => strlen($b) <=> strlen($a));
+        foreach ($aliases as $prefix => $programName) {
+            if ($code !== '' && str_starts_with($code, $prefix)) {
+                return canonicalProgram($department, $programName, false);
+            }
         }
     }
     return null;
@@ -1151,4 +1240,57 @@ function rateLimitExceeded($action, $key, $max, $windowSeconds) {
 
 function clientIp() {
     return (string)($_SERVER['REMOTE_ADDR'] ?? 'cli');
+}
+
+/**
+ * Run a shell command, or return null when the host does not allow it.
+ * Shared hosting (e.g. Hostinger) disables shell_exec; on PHP 8 calling a
+ * disabled function is a fatal error, so it is never called directly.
+ * Callers (the Python models) then use their built-in PHP fallback.
+ */
+function runShell($command) {
+    static $allowed = null;
+    if ($allowed === null) {
+        $disabled = array_map('trim', explode(',', strtolower((string)ini_get('disable_functions'))));
+        $allowed = function_exists('shell_exec') && !in_array('shell_exec', $disabled, true);
+    }
+    if (!$allowed) {
+        return null;
+    }
+    $output = @shell_exec($command);
+    return is_string($output) ? $output : null;
+}
+
+/*
+ * Masking for screens where a person's details must be recognisable but not
+ * readable in full (e.g. registration, where someone may type another
+ * student's ID). Letters are replaced with asterisks.
+ */
+
+/** "ABA-A, CARL ANDRIE P." → "A****, C*** A***** P." (first letter of each word kept). */
+function maskName($name) {
+    return preg_replace_callback('/\p{L}[\p{L}\'-]*/u', function ($m) {
+        $word = $m[0];
+        $len = mb_strlen($word);
+        return $len <= 1 ? $word : mb_substr($word, 0, 1) . str_repeat('*', $len - 1);
+    }, trim((string)$name));
+}
+
+/** "09171234567" → "09*******67" (first 2 and last 2 digits kept). */
+function maskPhone($number) {
+    $number = preg_replace('/\s+/', '', (string)$number);
+    $len = strlen($number);
+    if ($len === 0) {
+        return '';
+    }
+    return $len <= 4 ? str_repeat('*', $len) : substr($number, 0, 2) . str_repeat('*', $len - 4) . substr($number, -2);
+}
+
+/** "juan.delacruz@gmail.com" → "j***********@gmail.com". */
+function maskEmailAddress($email) {
+    $parts = explode('@', (string)$email, 2);
+    if (count($parts) !== 2 || $parts[0] === '') {
+        return '';
+    }
+    return mb_substr($parts[0], 0, 1) . str_repeat('*', max(3, mb_strlen($parts[0]) - 1)) . '@' . $parts[1];
 }

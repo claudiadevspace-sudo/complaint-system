@@ -38,7 +38,11 @@ class EnrollmentList {
     public function find($studentId) {
         $stmt = $this->db->prepare('SELECT * FROM enrolled_students WHERE student_id = :id');
         $stmt->execute([':id' => self::normalizeId($studentId)]);
-        return $stmt->fetch() ?: null;
+        $row = $stmt->fetch() ?: null;
+        if ($row) {
+            $row['contact_number'] = Crypto::decryptField($row['contact_number']);
+        }
+        return $row;
     }
 
     /** True if an account already uses this Student ID. */
@@ -77,8 +81,8 @@ class EnrollmentList {
                 . implode(', ', $missing) . '. Please ask OSWD to complete it, then register again.'];
         }
         $taken = $this->db->prepare('SELECT 1 FROM users WHERE email = :e LIMIT 1');
-        $taken->execute([':e' => $record['email']]);
-        if ($taken->fetchColumn()) {
+        $taken->execute([':e' => (string)($record['email'] ?? '')]);
+        if (!empty($record['email']) && $taken->fetchColumn()) {
             return ['ok' => false, 'message' => 'The email on your enrolled record is already used by another account. Please contact OSWD.'];
         }
         return ['ok' => true, 'record' => $record];
@@ -96,9 +100,8 @@ class EnrollmentList {
         if (canonicalProgram($record['department'] ?? '', $record['program'] ?? '') === null) {
             $missing[] = 'program';
         }
-        if (!filter_var($record['email'] ?? '', FILTER_VALIDATE_EMAIL)) {
-            $missing[] = 'email';
-        }
+        // Email is not required here: the campus Student Directory has none,
+        // so a student whose record has no email types it when registering.
         return $missing;
     }
 
@@ -177,6 +180,92 @@ class EnrollmentList {
         $this->upsert($id, trim((string)$fullName), $department, $program, $uploadedBy, $email, trim((string)$contact));
         (new AuditLog())->record('enrollment_add', 'enrollment', null, $id);
         return ['success' => true, 'message' => 'Student ID ' . $id . ' is on the enrolled list.'];
+    }
+
+    /* ==============================================================
+     * UPLOAD HISTORY (files kept in uploads/enrollment/)
+     * ============================================================== */
+
+    /** Private folder for uploaded lists; uploads/.htaccess blocks browser access. */
+    private static function uploadDir() {
+        return UPLOAD_DIR . 'enrollment/';
+    }
+
+    /**
+     * Keep the uploaded file after a successful import and record it, so OSWD
+     * can see and download every list that was uploaded.
+     */
+    public function keepUpload($tmpPath, $originalName, $mode, array $result, $uploadedBy) {
+        try {
+            $dir = self::uploadDir();
+            if (!is_dir($dir) && !mkdir($dir, 0750, true)) {
+                return false;
+            }
+            $ext = strtolower(pathinfo((string)$originalName, PATHINFO_EXTENSION));
+            $stored = date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . (in_array($ext, ['csv', 'xlsx', 'txt'], true) ? $ext : 'dat');
+            $saved = is_uploaded_file($tmpPath) ? move_uploaded_file($tmpPath, $dir . $stored) : copy($tmpPath, $dir . $stored);
+            if (!$saved) {
+                return false;
+            }
+            $originalSize = (int)filesize($dir . $stored);
+            Crypto::encryptFile($dir . $stored);   // the list holds personal data: stored encrypted
+            $this->db->prepare(
+                'INSERT INTO enrollment_uploads (original_name, stored_name, file_size, mode, students_in_file, added, updated, invalid, uploaded_by)
+                 VALUES (:name, :stored, :size, :mode, :valid, :added, :updated, :invalid, :by)'
+            )->execute([
+                ':name' => mb_substr(basename((string)$originalName), 0, 255),
+                ':stored' => $stored,
+                ':size' => $originalSize,
+                ':mode' => $mode === 'replace' ? 'replace' : 'add',
+                ':valid' => (int)($result['valid'] ?? 0),
+                ':added' => (int)($result['added'] ?? 0),
+                ':updated' => (int)($result['updated'] ?? 0),
+                ':invalid' => count($result['invalid'] ?? []),
+                ':by' => (int)$uploadedBy ?: null,
+            ]);
+            return true;
+        } catch (Throwable $e) {
+            return false;   // the list itself was imported; only the history entry failed
+        }
+    }
+
+    /** Uploaded lists, newest first. */
+    public function uploads($limit = 20) {
+        try {
+            return $this->db->query(
+                'SELECT eu.*, u.full_name AS uploaded_by_name FROM enrollment_uploads eu
+                 LEFT JOIN users u ON u.user_id = eu.uploaded_by
+                 ORDER BY eu.created_at DESC, eu.upload_id DESC LIMIT ' . (int)$limit
+            )->fetchAll();
+        } catch (PDOException $e) {
+            return [];   // table missing: migrate_enrollment_uploads.php not run yet
+        }
+    }
+
+    /** One upload with the full path of its file, or null. */
+    public function findUpload($uploadId) {
+        $stmt = $this->db->prepare('SELECT * FROM enrollment_uploads WHERE upload_id = :id');
+        $stmt->execute([':id' => (int)$uploadId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        $row['path'] = self::uploadDir() . basename($row['stored_name']);
+        return $row;
+    }
+
+    /** Delete a kept file and its history entry (the enrolled list is not changed). */
+    public function deleteUpload($uploadId) {
+        $row = $this->findUpload($uploadId);
+        if (!$row) {
+            return ['success' => false, 'message' => 'File not found.'];
+        }
+        if (is_file($row['path'])) {
+            @unlink($row['path']);
+        }
+        $this->db->prepare('DELETE FROM enrollment_uploads WHERE upload_id = :id')->execute([':id' => (int)$uploadId]);
+        (new AuditLog())->record('enrollment_file_delete', 'enrollment', null, $row['original_name']);
+        return ['success' => true, 'message' => 'The file "' . $row['original_name'] . '" was deleted. The enrolled list was not changed.'];
     }
 
     public function remove($enrolledId) {
@@ -283,7 +372,7 @@ class EnrollmentList {
             ':dept' => $department,
             ':program' => $program !== '' ? $program : null,
             ':email' => filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null,
-            ':contact' => trim((string)$contact) !== '' ? mb_substr(trim((string)$contact), 0, 20) : null,
+            ':contact' => trim((string)$contact) !== '' ? Crypto::encryptField(mb_substr(trim((string)$contact), 0, 20)) : null,
             ':by' => $uploadedBy,
         ]);
         return $stmt->rowCount();
@@ -305,34 +394,55 @@ class EnrollmentList {
      * otherwise the first column is the ID and the second (if any) the name.
      */
     private function extractRecords(array $rows) {
-        $cols = ['id' => 0, 'name' => 1, 'department' => null, 'program' => null, 'email' => null, 'contact' => null];
-        if ($rows) {
-            $header = array_map(fn($h) => strtolower(trim((string)$h)), $rows[0]);
-            $idCol = null;
-            foreach ($header as $i => $h) {
-                if (preg_match('/(student\s*_?\s*(id|no|number))|(^id\s*(no|number)?\.?$)|(^id_?number$)/', $h)) {
+        $cols = ['id' => 0, 'name' => 1, 'department' => null, 'program' => null, 'email' => null, 'contact' => null,
+                 'last' => null, 'given' => null, 'middle' => null];
+        // The heading row may come after a few title rows (e.g. the campus
+        // Student Directory starts with the university name and school year).
+        $headerAt = null;
+        $idCol = null;
+        foreach (array_slice($rows, 0, 25, true) as $r => $candidate) {
+            foreach ($candidate as $i => $h) {
+                $h = strtolower(trim((string)$h));
+                if (preg_match('/(student\s*_?\s*(id|no|number))|(^id\s*(no|number)?\.?$)|(^id_?number$)|(^idno$)/', $h)) {
+                    $headerAt = $r;
                     $idCol = $i;
-                    break;
+                    break 2;
                 }
             }
-            if ($idCol !== null) {
-                array_shift($rows);   // header row is not data
-                $cols = ['id' => $idCol, 'name' => null, 'department' => null, 'program' => null, 'email' => null, 'contact' => null];
-                foreach ($header as $i => $h) {
-                    if ($i === $idCol) {
-                        continue;
-                    }
-                    if ($cols['email'] === null && preg_match('/e-?mail|gmail/', $h)) {
-                        $cols['email'] = $i;
-                    } elseif ($cols['contact'] === null && preg_match('/contact|phone|mobile|cell/', $h)) {
-                        $cols['contact'] = $i;
-                    } elseif ($cols['name'] === null && preg_match('/name/', $h)) {
-                        $cols['name'] = $i;
-                    } elseif ($cols['department'] === null && preg_match('/dep|dept|college/', $h)) {
-                        $cols['department'] = $i;
-                    } elseif ($cols['program'] === null && preg_match('/program|course/', $h)) {
-                        $cols['program'] = $i;
-                    }
+        }
+        if ($headerAt !== null) {
+            $header = array_map(fn($h) => strtolower(trim((string)$h)), $rows[$headerAt]);
+            $rows = array_slice($rows, $headerAt + 1);   // title rows and heading are not data
+            $cols = ['id' => $idCol, 'name' => null, 'department' => null, 'program' => null, 'email' => null, 'contact' => null,
+                     'last' => null, 'given' => null, 'middle' => null];
+            // "Full Name" wins over other name columns; "Department" wins over "College".
+            foreach ($header as $i => $h) {
+                if ($cols['name'] === null && preg_match('/^(full\s*name|name|student\s*name|complete\s*name)$/', $h)) {
+                    $cols['name'] = $i;
+                } elseif ($h === 'department' || $h === 'dept') {
+                    $cols['department'] = $i;
+                }
+            }
+            foreach ($header as $i => $h) {
+                if ($i === $idCol || in_array($i, [$cols['name'], $cols['department']], true)) {
+                    continue;
+                }
+                if ($cols['email'] === null && preg_match('/e-?mail|gmail/', $h)) {
+                    $cols['email'] = $i;
+                } elseif ($cols['contact'] === null && preg_match('/contact|phone|mobile|cell/', $h)) {
+                    $cols['contact'] = $i;
+                } elseif (preg_match('/^(last\s*name|lastname|surname|family\s*name)$/', $h)) {
+                    $cols['last'] = $i;
+                } elseif (preg_match('/^(given\s*name|first\s*name|firstname|givenname)$/', $h)) {
+                    $cols['given'] = $i;
+                } elseif (preg_match('/^(middle\s*name|middlename|middle)$/', $h)) {
+                    $cols['middle'] = $i;
+                } elseif (preg_match('/name|mother|father/', $h)) {
+                    continue;   // "Name of Mother" etc. are not the student's name
+                } elseif ($cols['department'] === null && preg_match('/dep|dept|college/', $h)) {
+                    $cols['department'] = $i;
+                } elseif ($cols['program'] === null && preg_match('/program|course/', $h)) {
+                    $cols['program'] = $i;
                 }
             }
         }
@@ -356,14 +466,43 @@ class EnrollmentList {
             }
             $records[$id] = [
                 'student_id' => $id,
-                'full_name' => $cols['name'] !== null ? trim((string)($row[$cols['name']] ?? '')) : '',
+                'full_name' => $this->nameFromRow($row, $cols),
                 'department' => $cols['department'] !== null ? $this->matchDepartment($row[$cols['department']] ?? '') : null,
                 'program' => $cols['program'] !== null ? trim((string)($row[$cols['program']] ?? '')) : '',
                 'email' => $cols['email'] !== null ? trim((string)($row[$cols['email']] ?? '')) : '',
-                'contact_number' => $cols['contact'] !== null ? trim((string)($row[$cols['contact']] ?? '')) : '',
+                'contact_number' => $cols['contact'] !== null ? self::cleanContact($row[$cols['contact']] ?? '') : '',
             ];
+            // Course codes ("BSIT AUTO.") are saved as the official program.
+            $r = &$records[$id];
+            if ($r['program'] !== '' && $r['department']) {
+                $r['program'] = canonicalProgram($r['department'], $r['program']) ?? $r['program'];
+            }
+            unset($r);
         }
         return [array_values($records), $invalid, $duplicates];
+    }
+
+    /** "Full Name" column, else "Given Middle Last" from separate columns. */
+    private function nameFromRow(array $row, array $cols) {
+        if ($cols['name'] !== null && trim((string)($row[$cols['name']] ?? '')) !== '') {
+            return trim(preg_replace('/\s+/', ' ', (string)$row[$cols['name']]));
+        }
+        $parts = [];
+        foreach (['given', 'middle', 'last'] as $key) {
+            if ($cols[$key] !== null && trim((string)($row[$cols[$key]] ?? '')) !== '') {
+                $parts[] = trim((string)$row[$cols[$key]]);
+            }
+        }
+        return implode(' ', $parts);
+    }
+
+    /** Spreadsheets drop the leading 0 of mobile numbers: 9171234567 → 09171234567. */
+    private static function cleanContact($value) {
+        $value = trim((string)$value);
+        if (preg_match('/^9\d{9}$/', $value)) {
+            $value = '0' . $value;
+        }
+        return mb_substr($value, 0, 20);
     }
 
     /** CSV or TXT. The separator (comma, semicolon or tab) is detected. */

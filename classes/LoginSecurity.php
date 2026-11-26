@@ -102,10 +102,30 @@ class LoginSecurity {
             return ['success' => false, 'message' => 'Python training is not available on this server.'];
         }
 
+        $rows = $this->db->query("SELECT risk_label, feature_json FROM login_events
+            WHERE risk_label IN ('low','medium','high') AND feature_json IS NOT NULL
+            ORDER BY event_id ASC")->fetchAll();
+        $training = [];
+        foreach ($rows as $row) {
+            $features = json_decode($row['feature_json'], true);
+            if (is_array($features)) {
+                $training[] = ['label' => $row['risk_label'], 'features' => $features];
+            }
+        }
+        if (count($training) < 30) {
+            return ['success' => false, 'message' => 'At least 30 real, feature-bearing login events are required before retraining.'];
+        }
+        $dataDir = ML_MODEL_PATH . 'data';
+        if (!is_dir($dataDir)) {
+            mkdir($dataDir, 0750, true);
+        }
+        $dataPath = $dataDir . '/login_training.json';
+        file_put_contents($dataPath, json_encode($training, JSON_UNESCAPED_UNICODE));
+
         $bins = [PYTHON_PATH, 'python', 'py', 'python3'];
         foreach ($bins as $bin) {
-            $cmd = escapeshellarg($bin) . ' ' . escapeshellarg($script) . ' train 2>&1';
-            $out = @shell_exec($cmd);
+            $cmd = escapeshellarg($bin) . ' ' . escapeshellarg($script) . ' train ' . escapeshellarg($dataPath) . ' 2>&1';
+            $out = runShell($cmd);
             if ($out && str_contains($out, '"success"')) {
                 $data = json_decode($out, true);
                 return [

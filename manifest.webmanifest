@@ -1,0 +1,23 @@
+{
+  "name": "OSWD Student Complaint System",
+  "short_name": "OSWD Complaints",
+  "description": "File and follow complaints with the Office of Student Welfare and Development, NEMSU Cantilan Campus.",
+  "id": "./",
+  "start_url": "./dashboard.php",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f5f6fa",
+  "theme_color": "#2a338f",
+  "lang": "en",
+  "categories": ["education", "productivity"],
+  "icons": [
+    { "src": "assets/images/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/images/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/images/app-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "File a complaint", "url": "./submit_complaint.php", "icons": [{ "src": "assets/images/app-icon-192.png", "sizes": "192x192" }] },
+    { "name": "My complaints", "url": "./my_complaints.php", "icons": [{ "src": "assets/images/app-icon-192.png", "sizes": "192x192" }] }
+  ]
+}

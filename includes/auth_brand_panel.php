@@ -1,3 +1,11 @@
+<?php $authIsDark = appTheme() === 'dark'; ?>
+<!-- Light/dark switch (assets/js/theme.js). Shows the mode it switches TO. -->
+<button type="button" class="nemsu-auth-theme-toggle" id="themeToggle"
+        data-current-theme="<?php echo $authIsDark ? 'dark' : 'light'; ?>"
+        aria-label="<?php echo $authIsDark ? 'Switch to light mode' : 'Switch to dark mode'; ?>"
+        title="<?php echo $authIsDark ? 'Switch to light mode' : 'Switch to dark mode'; ?>">
+    <i class="bi bi-<?php echo $authIsDark ? 'sun' : 'moon-stars'; ?>" aria-hidden="true"></i>
+</button>
 <aside class="auth-panel-brand" aria-label="NEMSU Cantilan">
     <div class="auth-panel-brand__inner">
         <div class="auth-brand-icon auth-brand-icon--lg"><?php echo nemsuLogoImg('nemsu-logo nemsu-logo--auth'); ?></div>

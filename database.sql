@@ -1,18 +1,4 @@
--- ===================================================================
--- OSWD Complaint System - Complete Database Schema
--- Version: 1.0
--- Date: 2026-09-22
--- Description: Complete database schema for OSWD Complaint Management System
--- ===================================================================
 
--- Create Database
-CREATE DATABASE IF NOT EXISTS oswd_complaint_system;
-USE oswd_complaint_system;
-
--- ===================================================================
--- TABLE: users
--- Description: Stores all system users (students, coordinators, chairs, guidance, oswd)
--- ===================================================================
 CREATE TABLE IF NOT EXISTS users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) UNIQUE NOT NULL,
@@ -24,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     student_id VARCHAR(50),
     department VARCHAR(100),
     program VARCHAR(100),
-    contact_number VARCHAR(20),
+    contact_number VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     status ENUM('active', 'inactive') DEFAULT 'active',  -- account switch: inactive = cannot sign in
@@ -137,6 +123,7 @@ CREATE TABLE IF NOT EXISTS login_events (
     risk_score DECIMAL(5,4) NULL,
     risk_label ENUM('low','medium','high') NULL,
     model_version VARCHAR(20) NULL,
+    feature_json TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -273,7 +260,7 @@ CREATE TABLE IF NOT EXISTS enrolled_students (
     department VARCHAR(20) NULL,
     program VARCHAR(100) NULL,
     email VARCHAR(100) NULL,          -- used to create the account at registration
-    contact_number VARCHAR(20) NULL,
+    contact_number VARCHAR(255) NULL,
     uploaded_by INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -341,14 +328,14 @@ INSERT IGNORE INTO users (username, email, password, full_name, role, status) VA
 -- ===================================================================
 -- INDEXES: For Performance Optimization
 -- ===================================================================
-CREATE INDEX idx_complaints_status ON complaints(status);
-CREATE INDEX idx_complaints_category ON complaints(predicted_category);
-CREATE INDEX idx_complaints_created ON complaints(created_at);
-CREATE INDEX idx_complaints_department ON complaints(department);
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_users_status ON users(status);
-CREATE INDEX idx_notifications_user_read ON notifications(user_id, is_read);
-CREATE INDEX idx_notifications_created ON notifications(created_at);
+CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(status);
+CREATE INDEX IF NOT EXISTS idx_complaints_category ON complaints(predicted_category);
+CREATE INDEX IF NOT EXISTS idx_complaints_created ON complaints(created_at);
+CREATE INDEX IF NOT EXISTS idx_complaints_department ON complaints(department);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
 
 -- ===================================================================
 -- END OF DATABASE SCHEMA
@@ -361,4 +348,21 @@ CREATE TABLE IF NOT EXISTS security_rate_limits (
     key_hash CHAR(64) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_rate_lookup (action, key_hash, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Uploaded enrolled-student lists (files kept in uploads/enrollment/), see enrolled_students.php
+CREATE TABLE IF NOT EXISTS enrollment_uploads (
+    upload_id INT AUTO_INCREMENT PRIMARY KEY,
+    original_name VARCHAR(255) NOT NULL,
+    stored_name VARCHAR(100) NOT NULL,
+    file_size INT NOT NULL DEFAULT 0,
+    mode VARCHAR(10) NOT NULL DEFAULT 'add',
+    students_in_file INT NOT NULL DEFAULT 0,
+    added INT NOT NULL DEFAULT 0,
+    updated INT NOT NULL DEFAULT 0,
+    invalid INT NOT NULL DEFAULT 0,
+    uploaded_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_enrollment_uploads_created (created_at),
+    FOREIGN KEY (uploaded_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

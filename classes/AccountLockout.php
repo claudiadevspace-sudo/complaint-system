@@ -18,9 +18,12 @@ class AccountLockout {
         if ($username === '') {
             return null;
         }
-        $sql = "SELECT * FROM users WHERE username = :username OR email = :email LIMIT 1";
+        $sql = "SELECT * FROM users
+                WHERE username = :username OR email = :email OR (role = 'student' AND student_id = :student_id)
+                ORDER BY (username = :username2) DESC LIMIT 1";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([':username' => $username, ':email' => $username]);
+        $stmt->execute([':username' => $username, ':email' => $username, ':username2' => $username,
+            ':student_id' => EnrollmentList::normalizeId($username)]);
         return $stmt->fetch() ?: null;
     }
 
@@ -149,13 +152,22 @@ class AccountLockout {
         $username = trim((string)$username);
         $message = trim((string)$message);
         if ($username === '') {
-            return ['success' => false, 'message' => 'Enter the username or email used to sign in.'];
+            return ['success' => false, 'message' => 'We could not tell which account is locked. Please try to sign in first.'];
+        }
+        if ($message === '') {
+            return ['success' => false, 'message' => 'Please tell us what happened.'];
         }
         if (strlen($message) > 1000) {
             return ['success' => false, 'message' => 'Please keep your message under 1000 characters.'];
         }
 
         $user = $this->findUser($username);
+        if (!$user) {
+            // The lock also applies to names that do not exist (so attackers cannot
+            // tell which accounts exist), but there is nothing to unlock here.
+            return ['success' => false, 'no_account' => true, 'message' => 'No account uses "' . $username . '". '
+                . 'Check that you typed your Student ID or email correctly, or register if you do not have an account yet.'];
+        }
         $pending = $this->findPendingReview($user ? (int)$user['user_id'] : null, $this->normalizeKey($username));
         if ($pending) {
             $note = $message !== '' ? $message : $pending['message'];
@@ -173,7 +185,8 @@ class AccountLockout {
             ]);
             return [
                 'success' => true,
-                'message' => 'Your request is already with OSWD. We updated your details. Please wait for an email.',
+                'review_id' => (int)$pending['review_id'],
+                'message' => 'Your request was sent to the Super Admin.',
             ];
         }
 
@@ -196,15 +209,37 @@ class AccountLockout {
             ':message' => $message !== '' ? $message : 'Student requested help unlocking a locked account.',
         ]);
 
-        $this->notifyOswdAdmins(
-            'Student service unlock request',
-            'A student asked OSWD to review a locked account: ' . ($user['username'] ?? $username) . '.'
+        $reviewId = (int)$this->db->lastInsertId();
+        $this->notifySuperAdmins(
+            'Unlock request from Student Services',
+            'A student asked to unlock a locked account: ' . ($user['username'] ?? $username) . '.'
         );
 
         return [
             'success' => true,
-            'message' => 'Student services received your request. OSWD will review it and email you if a reset is approved.',
+            'review_id' => $reviewId,
+            'message' => 'Your request was sent to the Super Admin.',
         ];
+    }
+
+    /**
+     * Link requests that have no account yet to the right one, when the typed
+     * name, Student ID or the email saved with the request belongs to an account.
+     */
+    public function linkUnmatchedReviews() {
+        try {
+            $rows = $this->db->query("SELECT review_id, username_attempted, email FROM lockout_reviews
+                                      WHERE user_id IS NULL AND status = 'pending'")->fetchAll();
+            foreach ($rows as $row) {
+                $user = $this->findUser((string)$row['username_attempted']) ?: $this->findUser((string)$row['email']);
+                if ($user) {
+                    $this->db->prepare('UPDATE lockout_reviews SET user_id = :u, email = :e, full_name = :n WHERE review_id = :id')
+                        ->execute([':u' => $user['user_id'], ':e' => $user['email'], ':n' => $user['full_name'], ':id' => $row['review_id']]);
+                }
+            }
+        } catch (PDOException $e) {
+            // Listing still works without the links.
+        }
     }
 
     public function getReviews($status = 'pending') {
@@ -239,77 +274,143 @@ class AccountLockout {
         }
     }
 
+    /**
+     * Super Admin approves an unlock request: the system emails a 6-digit
+     * unlock code to the account's own email (plus a link to the page where
+     * the code is entered, for another device). Entering the code on
+     * Student Services unlocks the account and signs the student in.
+     */
     public function acceptReview($reviewId, $adminId, $note = '') {
         $review = $this->getReviewById($reviewId);
         if (!$review || $review['status'] !== 'pending') {
             return ['success' => false, 'message' => 'This request is no longer pending.'];
         }
         if (empty($review['user_id'])) {
-            return ['success' => false, 'message' => 'No matching account was found. Reject this request or ask the student for the correct username/email.'];
+            return ['success' => false, 'message' => 'This request is not linked to any account (the name typed does not exist), so there is no email to send a code to. Reject it instead.'];
         }
-
         $user = (new User())->getUserById((int)$review['user_id']);
         if (!$user) {
             return ['success' => false, 'message' => 'The account no longer exists.'];
         }
+        $email = trim((string)($user['email'] ?? ''));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'This account has no valid email address, so no code can be sent.'];
+        }
 
+        $code = (string)random_int(100000, 999999);
         $token = bin2hex(random_bytes(32));
-        $hash = hash('sha256', $token . LOGIN_HASH_SALT);
         $expiresAt = date('Y-m-d H:i:s', time() + LOGIN_RESET_TTL);
 
         $this->db->beginTransaction();
         try {
-            $invalidate = $this->db->prepare(
-                "UPDATE credential_resets SET used_at = NOW() WHERE review_id = :id AND used_at IS NULL"
-            );
-            $invalidate->execute([':id' => $reviewId]);
-
-            $insert = $this->db->prepare(
-                "INSERT INTO credential_resets (review_id, user_id, token_hash, expires_at)
-                 VALUES (:review_id, :user_id, :hash, :expires_at)"
-            );
-            $insert->execute([
-                ':review_id' => $reviewId,
-                ':user_id' => $user['user_id'],
-                ':hash' => $hash,
-                ':expires_at' => $expiresAt,
-            ]);
-
-            $update = $this->db->prepare(
-                "UPDATE lockout_reviews
-                 SET status = 'accepted', reviewed_by = :admin_id, reviewed_at = NOW(), review_note = :note
+            // Older codes and links for this account stop working.
+            $this->db->prepare('UPDATE login_otps SET used_at = NOW() WHERE user_id = :u AND used_at IS NULL')
+                ->execute([':u' => $user['user_id']]);
+            $this->db->prepare('UPDATE credential_resets SET used_at = NOW() WHERE review_id = :id AND used_at IS NULL')
+                ->execute([':id' => $reviewId]);
+            // The code (stored only as a hash).
+            $this->db->prepare('INSERT INTO login_otps (user_id, otp_hash, expires_at) VALUES (:u, :h, :e)')
+                ->execute([':u' => $user['user_id'], ':h' => hash('sha256', $code . LOGIN_HASH_SALT), ':e' => $expiresAt]);
+            // The link to the code page (stored only as a hash).
+            $this->db->prepare('INSERT INTO credential_resets (review_id, user_id, token_hash, expires_at) VALUES (:r, :u, :h, :e)')
+                ->execute([':r' => $reviewId, ':u' => $user['user_id'], ':h' => hash('sha256', $token . LOGIN_HASH_SALT), ':e' => $expiresAt]);
+            $this->db->prepare(
+                "UPDATE lockout_reviews SET status = 'accepted', reviewed_by = :admin, reviewed_at = NOW(), review_note = :note
                  WHERE review_id = :id AND status = 'pending'"
-            );
-            $update->execute([
-                ':admin_id' => $adminId,
-                ':note' => trim((string)$note) !== '' ? trim((string)$note) : 'Reset link sent.',
+            )->execute([
+                ':admin' => $adminId,
+                ':note' => trim((string)$note) !== '' ? trim((string)$note) : 'Unlock code sent.',
                 ':id' => $reviewId,
             ]);
             $this->db->commit();
         } catch (PDOException $e) {
             $this->db->rollBack();
-            return ['success' => false, 'message' => 'Could not create a reset link. Please try again.'];
+            return ['success' => false, 'message' => 'Could not create the unlock code. Please try again.'];
         }
 
-        $resetUrl = rtrim(SITE_URL, '/') . '/reset_credentials.php?token=' . $token;
         $hours = max(1, (int)(LOGIN_RESET_TTL / 3600));
+        $link = rtrim(SITE_URL, '/') . '/student_services.php?unlock=' . $token;
         $body = SITE_NAME . "\n"
             . "North Eastern Mindanao State University\n\n"
-            . "Hello " . ($user['full_name'] ?? 'Student') . ",\n\n"
-            . "OSWD approved your account unlock request. Use this link to set a new username and password:\n\n"
-            . $resetUrl . "\n\n"
-            . "This link expires in {$hours} hour(s). After you save your new credentials, we will email a 6-digit code to finish unlocking your account.\n\n"
-            . "If you did not ask for this, contact OSWD immediately.";
+            . 'Hello ' . ($user['full_name'] ?? 'Student') . ",\n\n"
+            . "Your request to unlock your account was approved. Your unlock code is:\n\n"
+            . "    {$code}\n\n"
+            . "Enter it on the Student Services page to open your account. If you are on another device, open this link first:\n"
+            . $link . "\n\n"
+            . "The code expires in {$hours} hour(s).\n\n"
+            . 'If you did not ask for this, contact OSWD immediately.';
+        if (!Mailer::send($email, $user['full_name'] ?? '', 'Your account unlock code', $body)) {
+            return ['success' => false, 'message' => 'The request was accepted, but the email could not be sent. Check the email settings, then try again.'];
+        }
+        return ['success' => true, 'message' => 'Request accepted. A 6-digit unlock code was emailed to ' . $this->maskEmail($email) . '.'];
+    }
 
-        $sent = Mailer::send($user['email'], $user['full_name'] ?? '', 'Reset your OSWD account credentials', $body);
-        if (!$sent) {
-            return [
-                'success' => false,
-                'message' => 'The request was accepted, but the reset email could not be sent. Check SMTP settings, then ask the student to wait or resend from this page.',
-            ];
+    /** The request a browser is following, for the Student Services page. */
+    public function unlockState($reviewId) {
+        $review = $this->getReviewById((int)$reviewId);
+        if (!$review) {
+            return null;
+        }
+        $user = !empty($review['user_id']) ? (new User())->getUserById((int)$review['user_id']) : null;
+        return [
+            'review_id' => (int)$review['review_id'],
+            'status' => $review['status'],
+            'review_note' => $review['review_note'] ?? '',
+            'masked_email' => $user ? $this->maskEmail($user['email']) : '',
+        ];
+    }
+
+    /** The request behind an emailed link (student_services.php?unlock=...), or null. */
+    public function reviewIdForLink($token) {
+        $reset = $this->getResetByToken($token);
+        return $reset && $reset['review_status'] === 'accepted' ? (int)$reset['review_id'] : null;
+    }
+
+    /**
+     * Check the emailed unlock code. On success the lock is cleared, the
+     * request is completed and the account is returned (the caller signs
+     * the student in).
+     */
+    public function verifyUnlockCode($reviewId, $code) {
+        $review = $this->getReviewById((int)$reviewId);
+        if (!$review || $review['status'] !== 'accepted' || empty($review['user_id'])) {
+            return ['success' => false, 'message' => 'This request has not been approved yet.'];
+        }
+        $code = trim((string)$code);
+        if (!preg_match('/^\d{6}$/', $code)) {
+            return ['success' => false, 'message' => 'Please enter the 6-digit code.'];
+        }
+        $attempts = (int)($_SESSION['unlock_code_attempts'][$reviewId] ?? 0) + 1;
+        $_SESSION['unlock_code_attempts'][$reviewId] = $attempts;
+
+        $userId = (int)$review['user_id'];
+        $stmt = $this->db->prepare(
+            'SELECT otp_id FROM login_otps WHERE user_id = :u AND otp_hash = :h AND used_at IS NULL AND expires_at > NOW()
+             ORDER BY otp_id DESC LIMIT 1'
+        );
+        $stmt->execute([':u' => $userId, ':h' => hash('sha256', $code . LOGIN_HASH_SALT)]);
+        $otpId = $stmt->fetchColumn();
+        if (!$otpId) {
+            if ($attempts >= 5) {
+                // Too many wrong codes: the code stops working and the request goes back to the Super Admin.
+                $this->db->prepare('UPDATE login_otps SET used_at = NOW() WHERE user_id = :u AND used_at IS NULL')->execute([':u' => $userId]);
+                $this->db->prepare("UPDATE lockout_reviews SET status = 'pending' WHERE review_id = :id")->execute([':id' => $reviewId]);
+                unset($_SESSION['unlock_code_attempts'][$reviewId]);
+                return ['success' => false, 'message' => 'Too many wrong codes. Your request was sent back to the Super Admin for a new code.'];
+            }
+            return ['success' => false, 'message' => 'Incorrect or expired code. ' . (5 - $attempts) . ' attempt(s) left.'];
         }
 
-        return ['success' => true, 'message' => 'Request accepted. A credential reset link was emailed to ' . $user['email'] . '.'];
+        $user = (new User())->getUserById($userId);
+        if (!$user || ($user['status'] ?? '') !== 'active') {
+            return ['success' => false, 'message' => 'This account cannot be opened. Please contact OSWD.'];
+        }
+        $this->db->prepare('UPDATE login_otps SET used_at = NOW() WHERE otp_id = :id')->execute([':id' => $otpId]);
+        $this->db->prepare('UPDATE credential_resets SET used_at = NOW() WHERE review_id = :id AND used_at IS NULL')->execute([':id' => $reviewId]);
+        $this->db->prepare("UPDATE lockout_reviews SET status = 'completed' WHERE review_id = :id")->execute([':id' => $reviewId]);
+        $this->clearForUser($userId);
+        unset($_SESSION['unlock_code_attempts'][$reviewId]);
+        return ['success' => true, 'user' => $user];
     }
 
     public function rejectReview($reviewId, $adminId, $note = '') {
@@ -332,10 +433,10 @@ class AccountLockout {
         if (!empty($review['email'])) {
             $body = SITE_NAME . "\n\n"
                 . "Hello " . ($review['full_name'] ?? 'Student') . ",\n\n"
-                . "OSWD reviewed your account unlock request and did not approve a credential reset.\n"
+                . "The Super Admin reviewed your account unlock request and did not approve a credential reset.\n"
                 . ($note !== '' ? "Note: {$note}\n\n" : "\n")
                 . "If you still cannot sign in, visit Student Services or contact OSWD in person.";
-            Mailer::send($review['email'], $review['full_name'] ?? '', 'OSWD could not approve your unlock request', $body);
+            Mailer::send($review['email'], $review['full_name'] ?? '', 'Your unlock request was not approved', $body);
         }
 
         return ['success' => true, 'message' => 'Request rejected.'];
@@ -559,9 +660,9 @@ class AccountLockout {
             ':message' => 'Account automatically blocked after repeated failed sign-in attempts.',
         ]);
 
-        $this->notifyOswdAdmins(
+        $this->notifySuperAdmins(
             'Account locked after failed logins',
-            'An account was blocked for 1 day and needs OSWD review: ' . ($user['username'] ?? $attempted) . '.'
+            'An account was locked for 1 day and is waiting in Unlock requests: ' . ($user['username'] ?? $attempted) . '.'
         );
     }
 
@@ -590,9 +691,10 @@ class AccountLockout {
         return $stmt->fetch() ?: null;
     }
 
-    private function notifyOswdAdmins($title, $message) {
+    /** Unlock requests are handled by the Super Admin (super_admin_unlock_requests.php). */
+    private function notifySuperAdmins($title, $message) {
         try {
-            $admins = $this->db->query("SELECT user_id FROM users WHERE role = 'oswd' AND status = 'active'")->fetchAll();
+            $admins = $this->db->query("SELECT user_id FROM users WHERE role = 'super_admin' AND status = 'active'")->fetchAll();
             foreach ($admins as $admin) {
                 $this->notifications->create((int)$admin['user_id'], null, $title, $message);
             }
@@ -655,7 +757,7 @@ class AccountLockout {
 
     private function failureMessage($type, $retryAfter, $attemptsLeft = null) {
         if ($type === 'blocked') {
-            return 'This account is locked for 1 day after too many failed sign-in attempts. Please contact Student Services so OSWD can review and help you reset your credentials.';
+            return 'This account is locked for 1 day after too many failed sign-in attempts. Please contact Student Services so the Super Admin can review and help you reset your credentials.';
         }
         if ($type === 'cooldown') {
             return 'Too many failed attempts. Please wait ' . (int)$retryAfter . ' seconds before trying again.'

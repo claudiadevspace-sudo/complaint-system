@@ -7,7 +7,7 @@
 Options -Indexes
 
 # Hidden files, database dumps, notes, logs, data and model files.
-<FilesMatch "(^\.|\.(sql|md|txt|log|ini|bak|lock|csv|py|pyc|pkl|joblib|sav)$)">
+<FilesMatch "(^\.|\.(sql|md|txt|log|ini|bak|lock|csv|py|pyc|pkl|joblib|sav|key|done)$)">
     Require all denied
 </FilesMatch>
 
@@ -16,3 +16,14 @@ Options -Indexes
 <FilesMatch "^(migrate_[A-Za-z0-9_]*|_[A-Za-z0-9_]*|create_super_admin|setup_system|backup_cron)\.php$">
     Require all denied
 </FilesMatch>
+
+# Progressive Web App: the app manifest needs its proper type.
+AddType application/manifest+json .webmanifest
+
+# The service worker and manifest must never be kept for days (the host
+# caches files for a week), or phones keep the old app, icons and logo.
+<IfModule mod_headers.c>
+    <FilesMatch "^(sw\.js|manifest\.webmanifest)$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>

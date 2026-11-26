@@ -8,3 +8,10 @@ config/smtp.php
 # uploads/, config/, migrations and other private files, so they must ship.
 backups/
 *cookies*.txt
+
+# Private error log written by config/config.php
+logs/
+
+# Master encryption key (classes/Crypto.php): keep a safe backup, never commit it
+config/encryption.key
+config/encryption.done

@@ -61,12 +61,18 @@ if (!isset($types[$ext])) {
 }
 $inline = in_array($ext, ['pdf', 'jpg', 'jpeg', 'png'], true);
 
+// Evidence and proof are stored encrypted (classes/Crypto.php).
+$content = Crypto::readFile($path);
+if ($content === null) {
+    fileNotFound();
+}
+
 header('Content-Type: ' . $types[$ext]);
-header('Content-Length: ' . filesize($path));
+header('Content-Length: ' . strlen($content));
 header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="complaint-' . $complaintId . '.' . $ext . '"');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: private, no-store');
 // Shown inside this site's document pop-up (an iframe), never on other sites.
 header('X-Frame-Options: SAMEORIGIN');
 header("Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; plugin-types application/pdf; frame-ancestors 'self'; sandbox allow-same-origin");
-readfile($path);
+echo $content;

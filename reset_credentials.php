@@ -98,7 +98,7 @@ if ($authMessage !== null) {
                     <p class="text-muted small mb-4">Choose a new username and password for <?php echo htmlspecialchars($reset['full_name'] ?? 'your account'); ?>.</p>
                 <?php else: ?>
                     <h2 class="h4 mb-2">Reset link unavailable</h2>
-                    <p class="text-muted small mb-4">This link is invalid or has expired. Ask Student Services to send a new request to OSWD.</p>
+                    <p class="text-muted small mb-4">This link is invalid or has expired. Send a new request from Student Services.</p>
                 <?php endif; ?>
 
                 <?php if ($authMessage !== null): ?>

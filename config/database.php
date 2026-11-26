@@ -26,6 +26,10 @@ class Database {
                 ]
             );
         } catch(PDOException $e) {
+            // Visitors see a generic message; the real reason (MySQL stopped,
+            // wrong password, unknown database...) goes to the PHP error log.
+            error_log('OSWD database connection failed: ' . $e->getMessage());
+            http_response_code(503);
             die('Database connection failed. Please try again later.');
         }
     }

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2a338f">
+<title>You're offline - OSWD Complaints</title>
+<link rel="icon" href="assets/images/favicon.png" type="image/png">
+<style>
+    :root { --bg: #f5f6fa; --card: #ffffff; --text: #1d2233; --muted: #5e657a; --border: #e3e6ef; --primary: #3542c8; --gold: #c9971a; }
+    @media (prefers-color-scheme: dark) {
+        :root { --bg: #0f1424; --card: #171d30; --text: #e4e7ef; --muted: #9aa2b8; --border: #283049; --primary: #9aa5f7; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+           background: var(--bg); color: var(--text); font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; }
+    .card { max-width: 26rem; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+            padding: 2rem 1.75rem; text-align: center; box-shadow: 0 12px 32px rgba(16, 24, 40, 0.08); border-top: 3px solid var(--gold); }
+    img { width: 72px; height: 72px; border-radius: 18px; }
+    h1 { font-size: 1.35rem; margin: 1rem 0 0.5rem; letter-spacing: -0.01em; }
+    p { color: var(--muted); margin: 0 0 1rem; font-size: 0.95rem; }
+    ul { text-align: left; color: var(--muted); font-size: 0.9rem; padding-left: 1.2rem; margin: 0 0 1.5rem; }
+    a.btn { display: inline-block; background: var(--primary); color: #fff; text-decoration: none; font-weight: 600;
+            padding: 0.6rem 1.4rem; border-radius: 8px; }
+    @media (prefers-color-scheme: dark) { a.btn { color: #0f1424; } }
+</style>
+</head>
+<body>
+    <main class="card">
+        <img src="assets/images/app-icon-192.png" alt="OSWD Student Complaint System">
+        <h1>You're offline</h1>
+        <p>This page hasn't been saved on this device yet, and there's no internet connection right now.</p>
+        <ul>
+            <li>Pages you've opened before (your dashboard, your complaints, notifications, profile) can be read offline.</li>
+            <li>Filing a complaint or sending a message needs a connection.</li>
+        </ul>
+        <a class="btn" href="dashboard.php">Try again</a>
+    </main>
+</body>
+</html>
